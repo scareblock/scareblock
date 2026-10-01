@@ -38,6 +38,22 @@ SB.Player = class {
     this._hudLine1 = '';
     this._hudLine2 = '';
     this._gainNow = 1;
+
+    // 렌더 시간 계측 — eval 의 --render-s 를 실측으로 채우기 위한 것.
+    // 블러 프레임과 일반 프레임을 나눠 재야 "블러가 얼마나 더 드는가"가 나온다.
+    // 기본은 꺼둔다. 켜는 것은 `scareblock.measure(true)` 뿐이고, 데모·평상시
+    // 경로에는 프레임당 비용이 없어야 한다.
+    this._measuring = false;
+    this._tBlurDraw = new SB.Samples();
+    this._tPlainDraw = new SB.Samples();
+    this._tBlurGap = new SB.Samples();
+    this._tPlainGap = new SB.Samples();
+    // 계측 구간 — 평균 프레임 주기를 세션 전체가 아니라 이 구간에서 낸다(#42 리뷰 🟡1).
+    this._measureFrom = 0;      // 계측 시작 시점의 renderFrames
+    this._measureAt = 0;        // 계측 시작 시각
+    this._measureEnd = null;    // 계측을 끈 시점 { frames, at } — 켜져 있으면 null
+    // 간격은 직전 프레임이 한 일의 비용이다. 직전 프레임의 블러 여부로 분류한다(#42 리뷰 🟡2).
+    this._prevHit = null;       // null = 직전 프레임이 없거나 버퍼 채우는 중
   }
 
   /**
@@ -201,6 +217,7 @@ SB.Player = class {
       // 같은 이유로 rAF도 멈춰 있었다. 복귀 첫 프레임의 간격(수 초)을 끊김으로
       // 세면 탭을 전환할 때마다 M1 연속 무드롭이 리셋된다.
       this._lastRenderAt = 0;
+      this._prevHit = null;
       this.stats.resyncs++;
     };
 
@@ -297,6 +314,7 @@ SB.Player = class {
     if (!this.running) return;
     const { octx, cfg } = this;
     const now = performance.now();
+    const gap = this._lastRenderAt ? now - this._lastRenderAt : 0;
     if (this._lastRenderAt && now - this._lastRenderAt > cfg.STALL_MS) {
       this.stats.renderStalls++;
       this._lastIncidentAt = now;
@@ -317,9 +335,19 @@ SB.Player = class {
     const slot = this.ring.findAtOrBefore(this.video.currentTime - cfg.DELAY_SEC);
     if (slot) {
       const hit = this.triggerAt(slot.t);
+      const drawAt = this._measuring ? performance.now() : 0;
       octx.filter = hit ? `blur(${cfg.BLUR_PX}px)` : 'none';
       octx.drawImage(slot.canvas, 0, 0, cfg.BUF_W, cfg.BUF_H);
       octx.filter = 'none';
+      if (this._measuring) {
+        (hit ? this._tBlurDraw : this._tPlainDraw).push(performance.now() - drawAt);
+        // gap은 직전 프레임 → 지금이라 직전 프레임의 비용이다. 이번 hit으로 나누면
+        // 버스트 경계마다 한 프레임씩 반대 칸에 들어간다.
+        if (gap > 0 && this._prevHit !== null) {
+          (this._prevHit ? this._tBlurGap : this._tPlainGap).push(gap);
+        }
+        this._prevHit = !!hit;
+      }
       const want = hit ? cfg.FADE_DB : 1;            // 음량 페이드다운
       if (want !== this._gainNow) {
         this._gainNow = want;
@@ -327,6 +355,7 @@ SB.Player = class {
       }
       if (hit) this._drawBadge(hit);
     } else {
+      this._prevHit = null;
       octx.fillStyle = '#000';
       octx.fillRect(0, 0, cfg.BUF_W, cfg.BUF_H);
       octx.fillStyle = '#fff';
@@ -392,6 +421,60 @@ SB.Player = class {
     octx.font = '13px ui-monospace, monospace';
     octx.fillText(this._hudLine1, 14, cfg.BUF_H - 34);
     octx.fillText(this._hudLine2, 14, cfg.BUF_H - 16);
+  }
+
+  /**
+   * 렌더 시간 — eval 의 `--render-s` 용.
+   *
+   * 블러 결정은 그 프레임을 그리는 rAF 콜백 안에서 일어나고, 픽셀은 다음
+   * 합성 시점에 보인다. 그래서 **결정 → 화면**은 `draw 시간 + 한 프레임 주기`다.
+   * 캔버스의 실제 제시 시각은 관측할 수 없으므로 이 값은 **근사**다.
+   *
+   * draw 시간은 CPU가 명령을 넣는 시간이라 GPU 완료를 포함하지 않는다.
+   * 그래서 프레임 간격도 함께 본다 — 블러가 비싸면 간격이 늘어난다.
+   */
+  /** 계측 on/off. 켜면 표본을 비우고 새로 모은다. */
+  measure(on = true) {
+    this._measuring = !!on;
+    if (on) {
+      this._tBlurDraw.reset();
+      this._tPlainDraw.reset();
+      this._tBlurGap.reset();
+      this._tPlainGap.reset();
+      this._measureFrom = this.stats.renderFrames;
+      this._measureAt = performance.now();
+      this._measureEnd = null;
+      this._prevHit = null;
+    } else if (this._measureAt && !this._measureEnd) {
+      this._measureEnd = { frames: this.stats.renderFrames, at: performance.now() };
+    }
+    SB.log(on ? '렌더 계측 켬 — 1분쯤 뒤 renderTiming()' : '렌더 계측 끔');
+    return this._measuring;
+  }
+
+  renderTiming() {
+    if (!this._measuring && !this._tBlurDraw.count) {
+      return { 안내: '계측이 꺼져 있다. scareblock.measure(true) 로 켜고 1분쯤 뒤에 다시 부른다.' };
+    }
+    // 계측 구간만 쓴다. 세션 전체 평균이면 기동 직후 끊김 구간이 섞여 주기가
+    // 길게 나오고 render_s가 부풀려진다.
+    const end = this._measureEnd
+      || { frames: this.stats.renderFrames, at: performance.now() };
+    const sec = (end.at - this._measureAt) / 1000;
+    const frames = end.frames - this._measureFrom;
+    const frameMs = sec > 0 && frames > 0 ? 1000 * sec / frames : null;
+    const blur = this._tBlurDraw.summary();
+    const suggest = blur && frameMs ? (blur.p90 + frameMs) / 1000 : null;
+    return {
+      블러프레임_draw_ms: blur,
+      일반프레임_draw_ms: this._tPlainDraw.summary(),
+      블러프레임_간격_ms: this._tBlurGap.summary(),
+      일반프레임_간격_ms: this._tPlainGap.summary(),
+      평균프레임주기_ms: frameMs ? +frameMs.toFixed(2) : null,
+      계측초: +sec.toFixed(1),
+      'render_s(제안)': suggest ? +suggest.toFixed(4) : null,
+      근거: 'render_s = p90(블러 draw) + 한 프레임 주기. 캔버스 제시 시각은 관측 불가라 근사값.',
+    };
   }
 
   report() {

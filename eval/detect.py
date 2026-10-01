@@ -32,6 +32,8 @@ class Detection:
     clip_id: str = ""      # 클립 간 교차 매칭을 막는다 (#19 리뷰 🔴2)
     onset_capped: bool = False   # 되짚기가 상한에 걸렸다 = onset 추정 실패
     verify_capped: bool = False  # 클립이 먼저 끝나 관찰 구간을 다 못 봤다 = 검증 못 함
+    source: str = "rule"   # 어느 경로가 낸 탐지인가 — §5 계약 배열의 source와 같은 뜻.
+    # 한 표에 두 경로가 섞일 때 「되짚기 상한 N건」 같은 집계가 어느 쪽 것인지 갈라야 한다 (#43 리뷰 🟡2)
 
     @property
     def backtrack_s(self) -> float:

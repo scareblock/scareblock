@@ -5,9 +5,12 @@
   "description": "유튜브 영상을 3초 늦게 재생하고, 그 사이 트리거 장면을 찾아 도달 전에 가린다.",
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
       "js": [
         "src/config.js",
+        "src/samples.js",
         "src/ringbuffer.js",
         "src/player.js",
         "src/detector-fake.js",

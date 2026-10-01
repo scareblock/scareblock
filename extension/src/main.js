@@ -31,6 +31,8 @@ window.SB = window.SB || {};
 
     window.scareblock = {
       stats: () => player.report(),
+      measure: (on = true) => player.measure(on),
+      renderTiming: () => player.renderTiming(),
       stop: () => { detector.stop(); player.stop(); player = null; },
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',

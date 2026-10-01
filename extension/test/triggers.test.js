@@ -12,6 +12,7 @@ const assert = require('assert');
 
 global.window = global;
 eval(fs.readFileSync(path.join(__dirname, '../src/config.js'), 'utf8'));
+eval(fs.readFileSync(path.join(__dirname, '../src/samples.js'), 'utf8'));  // player 생성자가 쓴다
 eval(fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8'));
 const { Player } = window.SB;
 

@@ -23,10 +23,43 @@ M1을 위한 MV3 뼈대. **탐지는 아직 가짜다** — 계약대로 넘기�
 ## 콘솔
 
 ```js
-scareblock.stats()      // 계측값 + M1 판정
-scareblock.blurNow()    // 지금 장면을 도달 전에 가린다
-scareblock.stop()       // 원복
+scareblock.stats()          // 계측값 + M1 판정
+scareblock.measure(true)    // 렌더 계측 켜기 (기본 꺼짐)
+scareblock.renderTiming()   // 렌더 시간 — eval 의 --render-s 용
+scareblock.blurNow()        // 지금 장면을 도달 전에 가린다
+scareblock.stop()           // 원복
 ```
+
+## 렌더 시간 측정 (`--render-s`)
+
+`eval/e1.py`의 적시성 계산은 **탐지 지연 + 렌더링 시간 ≤ lookahead** 로 판정한다.
+렌더링 시간이 없으면 p90이 하한으로만 쓰인다. 그 값을 여기서 잰다.
+
+```js
+scareblock.measure(true)     // 켜고
+// … 1분쯤 재생 …
+scareblock.renderTiming()    // 읽는다
+```
+
+**기본은 꺼져 있다.** 프레임당 `performance.now()` 2회가 M1 측정에 섞이지 않게 하려는 것이고,
+데모 경로에도 계측 비용이 있으면 안 된다. 켤 때 표본을 비우고 새로 모은다.
+
+| 항목 | 뜻 |
+|---|---|
+| `블러프레임_draw_ms` | 블러를 걸고 그리는 데 걸린 시간 |
+| `일반프레임_draw_ms` | 블러 없이 그린 시간 — 차이가 블러 비용이다 |
+| `블러프레임_간격_ms` | 블러 프레임의 rAF 간격 — **블러가 비싸면 여기가 늘어난다** |
+| `render_s(제안)` | `p90(블러 draw) + 한 프레임 주기` |
+
+**draw 시간은 CPU가 명령을 넣는 시간이라 GPU 완료를 포함하지 않는다.** 그래서 프레임
+간격을 함께 본다 — 블러가 GPU에서 비싸면 draw는 짧은데 간격이 늘어난다.
+
+**`render_s(제안)`은 근사다.** 블러 결정은 그 프레임을 그리는 rAF 콜백 안에서 일어나고
+픽셀은 다음 합성 시점에 보이므로 `draw + 한 프레임 주기`로 잡았다. 캔버스의 실제 제시
+시각은 관측할 수 없다.
+
+측정하려면 **트리거가 실제로 발동해야 한다.** 가짜 탐지기가 10초마다 내므로 1분쯤
+재생하면 표본이 쌓인다. 빨리 모으려면 `scareblock.blurNow()`를 몇 번 부른다.
 
 ## M1 판정
 
