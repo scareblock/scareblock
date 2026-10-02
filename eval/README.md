@@ -137,6 +137,21 @@ python3 -m eval.e1 --labels labels.csv --audio _local/wav --clips _local/clips/c
 기본값과 다른 값은 표 아래 「동작점:」 줄에 남는다. 기울기 조건은 `--drms-min 값`으로 켠다(기본 0은 끔).
 M1 실측 뒤 렌더링 시간을 반영하려면 `--render-s 값`.
 
+**사후 검증 관찰 구간 — 역시 라벨을 보기 전에.** 탐지 직후 `--verify-s` 초만큼 더 보고,
+**관찰이 끝나는 시점에도 여전히 크면**(`verify_level`, 끝 `verify_tail_s` 평균 기준) 「이어지는 소리」로 보고
+버린다(README 02단계 — 「소리가 이어지면 음악, 끊기면 점프 스케어」). 확신 시각은 관찰 구간만큼 뒤로 밀린다.
+`--verify-sweep`은 구간별 표만 내고 `--labels`를 주면 거부한다.
+
+```bash
+python3 -m eval.e1 --audio _local/dataset/wav --clips _local/dataset/clips.csv \
+  --verify-sweep 0,0.2,0.5,1,1.5
+```
+
+44클립·212.7분(2026.09.21)에서 검증 전 1356건 대비 남는 비율이 37%(0.2초) · 52%(0.5초) · 65%(1초) · 68%(1.5초)다.
+**관찰이 길수록 덜 버린다** — 잦아든 뒤를 보기 때문이고, 짧은 관찰은 아직 감쇠 중인 진짜 사건까지 버린다.
+무엇이 버려졌는지는 라벨이 있어야 알 수 있으므로 이 표만으로 값을 정하지 않는다. **상한은 예산에서 나온다** —
+`관찰 구간 ≤ 3초 − 탐지 지연(E1) − 렌더링 시간`. 클립이 먼저 끝나 관찰하지 못한 건은 기각하지 않고 세어서 함께 낸다.
+
 **동작점 고르기 — 라벨을 보기 전에.** `--rate-sweep`은 분당 발화율 표만 내고 `--labels`를 주면 거부한다
 ([labeling-guide §4](../docs/labeling-guide.md)).
 
@@ -190,7 +205,7 @@ python3 -m eval.e1 --selftest
 |---|---|
 | `labels.py` | §1 스키마 로드·검증, 대조 클립 비율 |
 | `features.py` | RMS · **dRMS/dt** · 스펙트럼 플럭스 · 직전 정적 · 감쇠 최댓값 |
-| `detect.py` | 규칙 탐지기. 확신 시각·onset 추정·`clip_id`를 기록한다 |
+| `detect.py` | 규칙 탐지기. 확신 시각·onset 추정·`clip_id`를 기록하고, 사후 검증 관찰 구간(`verify_s`)을 지원한다 |
 | `evaluate.py` | 같은 클립 안 onset ±0.5초 매칭(§6), P/R/F1 + 적시성 + 잡은 것 중 제때 + 탐지 지연 분포 요약 |
 | `e1.py` | lookahead 스윕, 표 출력, 발화율 스윕(`--rate-sweep`), 자체 점검 |
 | `yamnet.py` | 사전학습 YAMNet 클래스 점수 → 탐지 (11.05 조건부 열, 학습 없음). 모델 만들기는 [yamnet-setup](../docs/yamnet-setup.md) |
