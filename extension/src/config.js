@@ -9,6 +9,8 @@ SB.config = {
   BLUR_PX: 28,
   STALL_MS: 32,          // 렌더 끊김 판정 (60Hz 두 프레임)
   FADE_DB: 0.25,         // 블러 중 음량 배율
+  DETECTOR: 'rule',      // 'rule' | 'fake' — fake는 10초마다 가짜 트리거 (M1 계측용)
+  TRIGGER_TAIL_S: 1.5,   // 순간 사건 + 꼬리 — README 인터페이스 계약
 };
 
 SB.log = (...a) => console.log('[scareblock]', ...a);

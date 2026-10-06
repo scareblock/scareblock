@@ -1,7 +1,9 @@
-# scareblock 크롬 확장 (01단계)
+# scareblock 크롬 확장 (02단계)
 
-M1을 위한 MV3 뼈대. **탐지는 아직 가짜다** — 계약대로 넘기면 도달 전에
-가려지는지를 확인하는 것이 M1의 목적이다.
+**탐지는 규칙 기반이다** — `eval/detect.py`를 그대로 옮긴 `detector-rule.js`가 지연 전
+소리를 듣고, 점프 스케어를 찾으면 화면이 거기 닿기 전에 가린다(M2). 동작점은 #35 사전
+등록값 `surge_of_quiet = 20`이다. 01단계의 가짜 탐지기는 `config.js`의 `DETECTOR: 'fake'`로
+남겨 두었다 — M1을 다시 잴 때 10초 주기가 필요하다.
 
 ## 설치
 
@@ -16,8 +18,8 @@ M1을 위한 MV3 뼈대. **탐지는 아직 가짜다** — 계약대로 넘기�
 > `main.js`의 `boot()`에서 `location.pathname === '/watch'`로 걸러낸다. 진입 경로가
 > 어디든 `yt-navigate-finish` 한 자리로 모인다.
 
-영상이 3초 늦게 재생되고, **10초마다 가짜 트리거**가 나서 블러가 걸린다.
-콘솔에 `가짜 트리거 ... → 3s 뒤 도달 전 블러` 가 찍히고, 실제 블러는
+영상이 3초 늦게 재생되고, 정적 뒤 소리가 급등하면 블러가 걸린다.
+콘솔에 `규칙 탐지 #n onset=… fire=… (지금 …)` 가 찍히고, 실제 블러는
 그 3초 뒤에 나타난다. **그 간격이 이 시스템의 존재 이유다.**
 
 ## 콘솔
@@ -27,6 +29,7 @@ scareblock.stats()          // 계측값 + M1 판정
 scareblock.measure(true)    // 렌더 계측 켜기 (기본 꺼짐)
 scareblock.renderTiming()   // 렌더 시간 — eval 의 --render-s 용
 scareblock.blurNow()        // 지금 장면을 도달 전에 가린다
+scareblock.detections()     // 지금까지 낸 탐지 수
 scareblock.stop()           // 원복
 ```
 
@@ -85,7 +88,8 @@ M1 기준이 *"60초 이상 유지"* 이므로 **누적 0이 아니라 연속 60
 | `config.js` | 상수. 값의 근거는 `poc/README.md` |
 | `ringbuffer.js` | 프레임 링버퍼. 조회는 이분 탐색 O(log n) |
 | `player.js` | 지연 재생·블러·음량 페이드다운. **계약 소비자** |
-| `detector-fake.js` | 가짜 트리거. **계약 생산자** — 02단계에 교체된다 |
+| `detector-rule.js` | 규칙 탐지기. **계약 생산자** — `eval/detect.py`와 같은 계산 |
+| `detector-fake.js` | 10초마다 가짜 트리거 — M1 재측정용 (`DETECTOR: 'fake'`) |
 | `main.js` | 조립 + 유튜브 SPA 네비게이션 대응 |
 
 프레임당 비용이 계측을 실제로 망가뜨리므로(#21) **매 렌더 프레임 도는 두 조회는
@@ -96,6 +100,21 @@ M1 기준이 *"60초 이상 유지"* 이므로 **누적 0이 아니라 연속 60
 node extension/test/ringbuffer.test.js   # 8/8 — 이분 탐색 = 선형 탐색
 node extension/test/triggers.test.js     # 7/7 — 커서 조회 = 선형 탐색
 ```
+
+**규칙 탐지기는 파이썬과 대조한다.** E1이 잰 탐지기와 데모의 탐지기가 같아야 E1의 숫자가
+데모의 숫자다. 같은 wav를 양쪽에 넣어 발화 시각·onset을 10 ms 안에서 맞춘다.
+
+```bash
+python3 extension/test/rule-parity.py _local/dataset/wav/*.wav   # 3클립 52건 불일치 0 (2026.10.06)
+```
+
+브라우저는 48 kHz로 듣고 E1은 16 kHz wav를 썼다. 같은 3클립을 48 kHz로 올려 파이썬끼리
+비교하면 52건이 전부 ±50 ms 안에 남고 1건이 더 걸린다 — 표본률 차이는 작다.
+
+**미디어 시각 매핑.** 탐지기는 `ScriptProcessorNode`(2048 샘플)로 듣고, 첫 콜백의
+`currentTime`을 원점으로 샘플 수를 센다. 5.000 s · 12.000 s에 급등을 넣은 합성 클립에서
+onset이 4.968 s · 11.968 s로 나왔다 — **32 ms 일찍**, 블러가 조금 먼저 걸리는 안전한 쪽이다.
+시크·버퍼링 복귀·배속 변경에서는 원점이 깨지므로 탐지기를 처음부터 다시 돌린다.
 
 **재생기와 탐지기는 배열 하나로만 만난다.**
 
