@@ -26,13 +26,24 @@ window.SB = window.SB || {};
       window.scareblock = { error: String(e), stats: () => ({ 시작실패: String(e) }) };
       return;
     }
-    detector = new SB.FakeDetector(video, player);   // 02단계에서 교체된다
-    detector.start();
+    // 기본은 규칙 탐지기. M1을 다시 잴 때처럼 10초 주기가 필요하면 config에서 'fake'로 바꾼다.
+    detector = SB.config.DETECTOR === 'fake'
+      ? new SB.FakeDetector(video, player)
+      : new SB.RuleDetector(video, player);
+    try {
+      detector.start();
+    } catch (e) {
+      // 탐지기가 못 붙어도 지연 재생은 살린다 — 블러만 안 걸린다
+      console.error('[scareblock] 탐지기 시작 실패 — 지연 재생만 한다', e);
+    }
 
     window.scareblock = {
       stats: () => player.report(),
       measure: (on = true) => player.measure(on),
       renderTiming: () => player.renderTiming(),
+      detections: () => detector.n,
+      // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
+      setSurge: (n) => detector.setSurge?.(n),
       stop: () => { detector.stop(); player.stop(); player = null; },
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',

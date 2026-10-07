@@ -14,6 +14,7 @@
         "src/ringbuffer.js",
         "src/player.js",
         "src/detector-fake.js",
+        "src/detector-rule.js",
         "src/main.js"
       ],
       "world": "MAIN",
