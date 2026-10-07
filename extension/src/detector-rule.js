@@ -183,20 +183,28 @@ SB.RuleDetector = class {
 
       // 이 버퍼의 첫 샘플이 들어온 미디어 시각. 원점은 한 번만 잡고 이후는 샘플 수로
       // 센다 — 콜백마다 currentTime을 다시 읽으면 그 흔들림이 탐지 시각에 그대로 실린다.
-      if (this._anchor === null) {
-        this._anchor = this.video.currentTime - inp.duration;
-      }
       const rate = this.video.playbackRate || 1;
+      if (this._anchor === null) {
+        // 배속이면 이 버퍼가 덮는 미디어 시간은 inp.duration * rate다 (#46 리뷰 🟡1)
+        this._anchor = this.video.currentTime - inp.duration * rate;
+      }
       for (const d of this.core.push(this.mono.subarray(0, a.length))) this._emit(d, rate);
     };
 
     // 원점과 샘플 수로 미디어 시각을 세므로, 둘의 관계가 깨지는 곳에서 다시 시작한다.
     //   seeked     — 이전 위치의 정적·최댓값이 남으면 새 위치의 첫 소리가 「정적 뒤 급등」으로 걸린다
-    //   playing    — 버퍼링(waiting) 동안 미디어는 멈췄는데 무음 샘플은 계속 세어진다
     //   ratechange — 원점 이후 배속이 하나라는 가정이 깨진다
-    this._onReset = () => { this.core.reset(); this._anchor = null; };
-    this._resetOn = ['seeked', 'playing', 'ratechange'];
-    for (const ev of this._resetOn) this.video.addEventListener(ev, this._onReset);
+    //   playing    — **버퍼링(waiting)을 거쳤을 때만.** 그동안 미디어는 멈췄는데 무음 샘플은 계속 세어진다.
+    //                사용자 일시정지 뒤의 playing은 리셋하지 않는다 — 멈춘 동안은 콜백이 샘플을 넣지 않아
+    //                원점과 샘플 수의 관계가 그대로이고, 리셋하면 직전 1초 정적 이력만 잃는다 (#46 리뷰 🟡2)
+    this._onReset = () => { this.core.reset(); this._anchor = null; this._stalled = false; };
+    this._onWaiting = () => { this._stalled = true; };
+    this._onPlaying = () => { if (this._stalled) this._onReset(); };
+    this._listeners = [
+      ['seeked', this._onReset], ['ratechange', this._onReset],
+      ['waiting', this._onWaiting], ['playing', this._onPlaying],
+    ];
+    for (const [ev, fn] of this._listeners) this.video.addEventListener(ev, fn);
 
     src.connect(this.node);
     // 목적지에 이어야 Chrome이 콜백을 부른다. 출력 버퍼를 건드리지 않으므로 무음이다.
@@ -240,7 +248,7 @@ SB.RuleDetector = class {
   }
 
   stop() {
-    for (const ev of this._resetOn || []) this.video.removeEventListener(ev, this._onReset);
+    for (const [ev, fn] of this._listeners || []) this.video.removeEventListener(ev, fn);
     if (this.node) {
       this.node.onaudioprocess = null;
       try { this.node.disconnect(); } catch { /* 이미 끊김 */ }
