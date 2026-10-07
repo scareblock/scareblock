@@ -223,6 +223,22 @@ SB.RuleDetector = class {
     );
   }
 
+  /**
+   * 데모용 — 동작점을 실행 중에 바꾼다. **E1 보고값은 20 그대로다(#35 사전 등록).**
+   * 낮추면 더 잡지만 일반 장면에서도 자주 울린다. 그 트레이드오프를 보여주려고 연다.
+   * 앞으로 들어오는 프레임부터 적용되고, 정적·최댓값 이력은 그대로 이어 쓴다.
+   */
+  setSurge(n) {
+    if (!(Number.isFinite(n) && n > 1)) {
+      console.warn('[scareblock] surge_of_quiet는 1보다 큰 숫자여야 한다', n);
+      return this.core?.p.surge_of_quiet;
+    }
+    if (this.core) this.core.p.surge_of_quiet = n;
+    else this.params = { ...this.params, surge_of_quiet: n };
+    SB.log(`surge_of_quiet = ${n}` + (n === 20 ? ' (E1 동작점)' : ' — E1 동작점(20)과 다르다'));
+    return n;
+  }
+
   stop() {
     for (const ev of this._resetOn || []) this.video.removeEventListener(ev, this._onReset);
     if (this.node) {

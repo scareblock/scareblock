@@ -42,6 +42,8 @@ window.SB = window.SB || {};
       measure: (on = true) => player.measure(on),
       renderTiming: () => player.renderTiming(),
       detections: () => detector.n,
+      // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
+      setSurge: (n) => detector.setSurge?.(n),
       stop: () => { detector.stop(); player.stop(); player = null; },
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',
