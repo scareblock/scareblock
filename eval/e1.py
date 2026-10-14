@@ -89,6 +89,30 @@ def parse_rate_sweep(spec: str, given: Params) -> tuple[str, list[float]]:
     return name, values
 
 
+BUDGET_S = 3.0   # M1 정량 기준의 지연 버퍼. 「탐지 시점 + 관찰 구간 ≤ 3초」(README 02단계)
+
+
+def verify_sweep(clip_audio: dict[str, Path], values: list[float], base: Params):
+    """관찰 구간을 바꿔가며 (살아남은 탐지, 건/분, 관찰 못 한 건수)를 잰다. **라벨을 읽지 않는다.**
+
+    관찰 구간도 동작점과 같은 축이다 — 라벨 없이 고르고 결과를 본 뒤에 바꾸지 않는다.
+    검증 전 건수를 함께 돌려주어 「관찰로 얼마가 걸러졌는가」를 비율로 읽게 한다.
+    """
+    feats, total_s = {}, 0.0
+    for clip_id, wav in sorted(clip_audio.items()):
+        x, sr = load_wav(wav)
+        feats[clip_id] = extract(x, sr)
+        total_s += len(x) / sr
+    n_off = sum(len(run(f, replace(base, verify_s=0.0), clip_id=c)) for c, f in feats.items())
+    rows = []
+    for v in values:
+        p = replace(base, verify_s=v)
+        dets = [d for c, f in feats.items() for d in run(f, p, clip_id=c)]
+        rows.append((v, len(dets), detections_per_minute(dets, total_s),
+                     sum(d.verify_capped for d in dets)))
+    return rows, n_off, total_s
+
+
 def params_from_args(a) -> Params:
     """`--surge-of-quiet` 같은 인자를 Params로. 기본값은 Params 자신의 것이다."""
     return Params(**{f.name: getattr(a, f.name) for f in fields(Params)})
@@ -405,8 +429,78 @@ def _selftest() -> int:
               f"분모 {sweep_total:.3f}초 = analyse {base_total:.3f}초 "
               f"{'일치' if denom_ok else '어긋남'} · 명세 검사 {'통과' if spec_ok else '실패'}")
 
+        # 사후 검증 — 「이어지는 소리」와 「끊기는 소리」를 실제로 가르는지. 갈라내지 못하면
+        # 관찰 구간은 예산만 먹고 아무것도 안 거르는 장치가 된다.
+        sr2 = 16000
+        x = rng2 = np.random.default_rng(7)
+        y = rng2.normal(0, 0.004, int(sr2 * 30)).astype(np.float32)
+        a = int(5.0 * sr2); n = int(0.6 * sr2)          # 점프 스케어 — 2 ms 상승 후 감쇠
+        env = np.ones(n, np.float32); env[: int(0.002 * sr2)] = np.linspace(0, 1, int(0.002 * sr2))
+        env *= np.linspace(1, 0.2, n)
+        y[a:a + n] += (rng2.normal(0, 0.35, n) * env).astype(np.float32)
+        b = int(15.0 * sr2); m = int(3.0 * sr2)          # 음악 — 똑같이 튀어오르고 3초 지속
+        env2 = np.ones(m, np.float32); env2[: int(0.002 * sr2)] = np.linspace(0, 1, int(0.002 * sr2))
+        y[b:b + m] += (rng2.normal(0, 0.35, m) * env2).astype(np.float32)
+        vwav = tmpdir / "verify.wav"
+        wavfile.write(vwav, sr2, np.clip(y, -1, 1))
+        vf = extract(*load_wav(vwav))
+
+        def _at(dets, t, tol=0.5):
+            return [d for d in dets if abs(d.onset - t) < tol]
+        off = run(vf, Params(), clip_id="v")
+        on = run(vf, Params(verify_s=1.0), clip_id="v")
+        # 검증 없이는 둘 다 잡히고, 1초 관찰하면 지속음만 빠진다
+        verify_ok = (len(_at(off, 5.0)) == 1 and len(_at(off, 15.0)) == 1
+                     and len(_at(on, 5.0)) == 1 and len(_at(on, 15.0)) == 0
+                     # 확신 시각이 관찰 구간만큼 뒤로 밀린다
+                     and abs(_at(on, 5.0)[0].fire - (_at(off, 5.0)[0].fire + 1.0)) < 1e-9)
+
+        # ⚠ 실제 클립의 점프 스케어는 이렇게 빨리 잦아들지 않는다. c001의 라벨 3건은 3초 뒤에도
+        # 처음 크기의 0.70~0.94배였다(2026.09.22 실측). 아래는 그 모양을 흉내낸 것이고,
+        # **현재 기준은 이것을 「이어지는 소리」로 보고 버린다** — 즉 진짜 사건을 버린다.
+        # 위의 빠른 감쇠 픽스처만 두면 점검이 이 한계를 숨긴다. 기준을 고치면 이 항목이 깨지고,
+        # 깨진 김에 이 주석도 함께 고치게 된다.
+        real = rng2.normal(0, 0.004, int(sr2 * 20)).astype(np.float32)
+        r0 = int(5.0 * sr2); rn = int(4.0 * sr2)
+        renv = np.ones(rn, np.float32); renv[: int(0.002 * sr2)] = np.linspace(0, 1, int(0.002 * sr2))
+        renv[int(0.002 * sr2):] = np.linspace(1.0, 0.8, rn - int(0.002 * sr2))   # 4초에 걸쳐 0.8배까지만
+        real[r0:r0 + rn] += (rng2.normal(0, 0.35, rn) * renv).astype(np.float32)
+        rwav = tmpdir / "real-tail.wav"
+        wavfile.write(rwav, sr2, np.clip(real, -1, 1))
+        rf = extract(*load_wav(rwav))
+        real_off = [d for d in run(rf, Params(), clip_id="r") if abs(d.onset - 5.0) < 1.0]
+        real_on = [d for d in run(rf, Params(verify_s=0.5), clip_id="r") if abs(d.onset - 5.0) < 1.0]
+        # 지금은 「버린다」가 맞는 서술이다. 기준을 고쳐 남기게 되면 이 줄이 깨진다.
+        real_ok = len(real_off) == 1 and len(real_on) == 0
+        print(f"⚠ 실제 감쇠(3초 뒤 0.8배) 사건: 검증 없이 {len(real_off)}건 → 0.5초 관찰 "
+              f"{len(real_on)}건 — **현재 기준은 진짜 사건을 버린다**(c001 실측과 같은 모양)")
+
+        # 클립이 먼저 끝나면 기각하지 않고 「관찰 못 함」으로 표시한다.
+        # 탐지를 끝에서 0.95초 앞에 둔다 — 1초 관찰이라 구간은 잘리지만(capped) **꼬리는 아직
+        # 클립 안**이라, 「기각 조건은 맞는데 잘려서 봐주는」 분기를 실제로 지나간다.
+        # 더 앞에 두면 꼬리까지 클립 밖으로 나가 빈 구간이 되어 이 분기를 건드리지 못한다.
+        z = rng2.normal(0, 0.004, int(sr2 * 6)).astype(np.float32)
+        c0 = int(5.05 * sr2); k = len(z) - c0
+        z[c0:] += (rng2.normal(0, 0.35, k) * np.ones(k, np.float32)).astype(np.float32)
+        ewav = tmpdir / "edge.wav"
+        wavfile.write(ewav, sr2, np.clip(z, -1, 1))
+        edge = run(extract(*load_wav(ewav)), Params(verify_s=1.0), clip_id="e")
+        edge_ok = len(edge) == 1 and edge[0].verify_capped
+
+        # 스윕 표 — 관찰이 길수록 덜 버린다(감쇠한 뒤를 보므로). 0초는 검증 전과 같다
+        vrows, v_off, _ = verify_sweep({"v": vwav}, [0.0, 1.0], Params())
+        vsweep_ok = (vrows[0][1] == v_off == len(off) and vrows[1][1] == len(on) < v_off)
+        print(f"사후 검증: 검증 전 {len(off)}건 → 1초 관찰 {len(on)}건 "
+              f"(지속음 {'거름' if len(_at(on, 15.0)) == 0 else '못 거름'} · "
+              f"점프 스케어 {'남김' if len(_at(on, 5.0)) == 1 else '버림'}) · "
+              f"클립 끝 {'관찰 못 함으로 표시' if edge_ok else '실패'}")
+
         ok = (
-            sweep_ok
+            real_ok
+            and verify_ok
+            and edge_ok
+            and vsweep_ok
+            and sweep_ok
             and lat_ok
             and neg_ok
             and render_ok
@@ -441,12 +535,47 @@ def main() -> int:
                     help="블러 렌더링 시간(초). M1 실측값을 넣으면 적시성에 더해진다")
     ap.add_argument("--rate-sweep", metavar="필드=값,값,…",
                     help="예: surge_of_quiet=5,20,35,60 — 분당 발화율 표만 낸다. 라벨을 읽지 않는다")
+    ap.add_argument("--verify-sweep", metavar="값,값,…",
+                    help="예: 0,0.2,0.5,1 — 사후 검증 관찰 구간별 표만 낸다. 라벨을 읽지 않는다")
     ap.add_argument("--selftest", action="store_true", help="합성 오디오로 파이프라인 점검")
     a = ap.parse_args()
 
     if a.selftest:
         return _selftest()
     params = params_from_args(a)
+
+    if a.verify_sweep:
+        if a.labels:
+            ap.error("--verify-sweep은 라벨을 읽지 않는다 — 관찰 구간도 라벨을 보기 전에 고른다. --labels를 빼라")
+        if not a.audio:
+            ap.error("--verify-sweep에는 --audio가 필요하다")
+        if params.verify_s != Params().verify_s:
+            ap.error("--verify-s 와 --verify-sweep 을 함께 줄 수 없다 — 스윕이 행마다 덮어쓴다")
+        try:
+            vals = [float(v) for v in a.verify_sweep.split(",")]
+        except ValueError:
+            ap.error(f"--verify-sweep 값은 숫자여야 한다 — 받은 것: {a.verify_sweep}")
+        if any(v < 0 or v > BUDGET_S for v in vals):
+            ap.error(f"--verify-sweep 값은 0 이상 {BUDGET_S:g}초 이하여야 한다 — "
+                     f"관찰 구간은 3초 예산 안에서 고른다")
+        audio = {q.stem: q for q in Path(a.audio).glob("*.wav")}
+        ids = L.load_clips(a.clips) if a.clips else sorted(audio)
+        used = {c: audio[c] for c in ids if c in audio}
+        if not used:
+            print(f"실패: 평가할 wav가 없다 — --audio {a.audio}", file=sys.stderr)
+            return 1
+        rows, n_off, total = verify_sweep(used, vals, params)
+        print(f"클립 {len(used)}/{len(ids)}개 · {total / 60:.1f}분 · {changed_params(replace(params, verify_s=0.0))} "
+              f"· 라벨 미사용 — 무엇이 걸러졌는지는 라벨이 있어야 안다")
+        print(f"검증 전 탐지 {n_off}건\n")
+        print("| 관찰 구간 | 남은 탐지 | 건/분 | 검증 전 대비 | 관찰 못 함 | 남는 예산 |")
+        print("|---|---|---|---|---|---|")
+        for v, n, r, capped in rows:
+            kept = f"{n / n_off:.0%}" if n_off else "—"
+            print(f"| {v:g}초 | {n} | {r:.2f} | {kept} | {capped}건 | {BUDGET_S - v:.1f}초 |")
+        print("\n남는 예산 = 3초 − 관찰 구간. 여기서 탐지 지연(E1)과 렌더링 시간이 더 빠진다 — "
+              "렌더링은 아직 미측정이다")
+        return 0
 
     if a.rate_sweep:
         if a.labels:
