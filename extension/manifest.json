@@ -11,6 +11,7 @@
       "js": [
         "src/config.js",
         "src/samples.js",
+        "src/visual.js",
         "src/ringbuffer.js",
         "src/player.js",
         "src/detector-fake.js",

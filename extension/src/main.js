@@ -4,6 +4,7 @@ window.SB = window.SB || {};
 (() => {
   let player = null;
   let detector = null;
+  let visual = null;
 
   function findVideo() {
     return document.querySelector('video.html5-main-video') ||
@@ -36,15 +37,24 @@ window.SB = window.SB || {};
       // 탐지기가 못 붙어도 지연 재생은 살린다 — 블러만 안 걸린다
       console.error('[scareblock] 탐지기 시작 실패 — 지연 재생만 한다', e);
     }
+    // 시각 특징은 아직 트리거를 내지 않는다 — 기록만 한다. 못 붙어도 나머지는 그대로 돈다
+    try {
+      visual = new SB.VisualSampler(video);
+      visual.start();
+    } catch (e) {
+      console.error('[scareblock] 시각 특징 시작 실패 — 오디오 탐지만 한다', e);
+      visual = null;
+    }
 
     window.scareblock = {
       stats: () => player.report(),
       measure: (on = true) => player.measure(on),
       renderTiming: () => player.renderTiming(),
       detections: () => detector.n,
+      visual: () => visual?.report() ?? { 안내: '시각 특징이 꺼져 있다' },
       // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
       setSurge: (n) => detector.setSurge?.(n),
-      stop: () => { detector.stop(); player.stop(); player = null; },
+      stop: () => { visual?.stop(); detector.stop(); player.stop(); player = null; },
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',
         confidence: 1, duration: dur, source: 'manual',
@@ -67,7 +77,7 @@ window.SB = window.SB || {};
 
   // 유튜브 SPA 네비게이션
   document.addEventListener('yt-navigate-finish', () => {
-    if (player?.running) { detector?.stop(); player.stop(); player = null; }
+    if (player?.running) { visual?.stop(); detector?.stop(); player.stop(); player = null; }
     setTimeout(boot, 800);
   });
 
