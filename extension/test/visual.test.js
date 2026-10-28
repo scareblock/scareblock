@@ -105,4 +105,56 @@ ok('휘도 변환 — 흰색 255, 검정 0, 순수 초록이 가장 밝다', () 
   assert.ok(px(0, 255, 0) > px(255, 0, 0) && px(255, 0, 0) > px(0, 0, 255));
 });
 
-console.log(`${pass}/9 통과`);
+// ── 샘플러: <video>·캔버스를 흉내 내 rVFC 루프가 샘플 실패에도 이어지는지 본다 ──
+window.SB.config = { VISUAL_FPS: 2 };
+window.SB.Samples = class { push() {} summary() { return {}; } };
+const logs = [];
+window.SB.log = (m) => logs.push(m);
+
+const sampler = (failAt) => {
+  let canvases = 0, draws = 0;
+  global.document = {
+    createElement: () => {
+      canvases++;
+      return {
+        getContext: () => ({
+          drawImage: () => { draws++; },
+          getImageData: () => {
+            if (failAt(draws)) { const e = new Error('tainted'); e.name = 'SecurityError'; throw e; }
+            return { data: new Uint8ClampedArray(W * H * 4) };
+          },
+        }),
+      };
+    },
+  };
+  let cb = null;
+  const video = { currentTime: 0, requestVideoFrameCallback: (f) => { cb = f; } };
+  const s = new window.SB.VisualSampler(video);
+  s.start();
+  const tick = (t) => { const f = cb; cb = null; f(0, { mediaTime: t }); return cb !== null; };
+  return { s, tick, canvases: () => canvases };
+};
+
+ok('샘플이 던져도 루프가 이어지고 캔버스를 새로 만든다', () => {
+  const { s, tick, canvases } = sampler((d) => d === 2);   // 두 번째 샘플만 실패
+  for (let i = 0; i < 4; i++) assert.ok(tick(i * 0.5), `t=${i * 0.5}에서 rVFC 재등록이 끊겼다`);
+  assert.strictEqual(s.failures, 1);
+  assert.strictEqual(s.log.length, 3);
+  assert.strictEqual(canvases(), 2);
+  assert.ok(s.running);
+  assert.strictEqual(s.report().실패, 1);
+});
+
+ok('연속으로 실패하면 끄고 남긴다', () => {
+  logs.length = 0;
+  const { s, tick } = sampler(() => true);
+  let alive = true;
+  for (let i = 0; i < s.maxFailRun; i++) alive = tick(i * 0.5);
+  assert.strictEqual(alive, false);
+  assert.strictEqual(s.running, false);
+  assert.strictEqual(s.failures, s.maxFailRun);
+  assert.ok(logs.some((m) => m.includes('시각 특징 중단') && m.includes('SecurityError')));
+  assert.strictEqual(s.report().상태, '꺼짐');
+});
+
+console.log(`${pass}/11 통과`);

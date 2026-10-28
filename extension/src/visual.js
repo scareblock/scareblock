@@ -112,20 +112,29 @@ SB.VisualSampler = class {
     this.cuts = 0;
     this.flashes = 0;
     this.cost = new SB.Samples();
+    this.failures = 0;       // 샘플 실패 누적
+    this.failRun = 0;        // 연속 실패 — maxFailRun에 닿으면 끈다
+    this.maxFailRun = 5;
+    this.lastError = null;
   }
 
   start() {
+    const { w, h } = this.core.p;
+    this._makeCanvas();
+    this.y = new Uint8Array(w * h);
+    this._last = -1;
+    this.running = true;
+    this.video.requestVideoFrameCallback(this._onFrame);
+    SB.log(`시각 특징 시작 — ${this.fps}fps · ${w}x${h}`);
+  }
+
+  _makeCanvas() {
     const { w, h } = this.core.p;
     this.canvas = document.createElement('canvas');
     this.canvas.width = w;
     this.canvas.height = h;
     // 매번 읽어 가므로 CPU 쪽 캔버스로 둔다 — GPU 캔버스면 getImageData마다 되읽기가 생긴다
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true, alpha: false });
-    this.y = new Uint8Array(w * h);
-    this._last = -1;
-    this.running = true;
-    this.video.requestVideoFrameCallback(this._onFrame);
-    SB.log(`시각 특징 시작 — ${this.fps}fps · ${w}x${h}`);
   }
 
   _onFrame = (_now, meta) => {
@@ -135,10 +144,34 @@ SB.VisualSampler = class {
     if (t < this._last) this._last = -1;
     if (this._last < 0 || t - this._last >= 1 / this.fps - 0.002) {
       this._last = t;
-      this._sample(t);
+      // 여기서 던지면 아래 rVFC 재등록에 닿지 못해 루프가 소리 없이 끊긴다 — 잡고 이어 간다
+      try {
+        this._sample(t);
+        this.failRun = 0;
+      } catch (e) {
+        this._fail(e, t);
+        if (!this.running) return;
+      }
     }
     this.video.requestVideoFrameCallback(this._onFrame);
   };
+
+  /**
+   * 샘플 실패. 대표적인 것은 다른 출처 프레임(일부 광고)을 그려 캔버스가 오염된 뒤의
+   * `getImageData` SecurityError다. 오염은 그 캔버스에 영구히 남으므로 캔버스를 새로 만든다.
+   * 끊긴 사이의 차이는 의미가 없으니 core도 처음부터. 연속으로 실패하면 끄고 남긴다.
+   */
+  _fail(e, t) {
+    this.failures++;
+    this.failRun++;
+    this.lastError = `${e.name}: ${e.message}`;
+    this.core.reset();
+    this._makeCanvas();
+    if (this.failRun >= this.maxFailRun) {
+      this.running = false;
+      SB.log(`시각 특징 중단 — ${this.failRun}회 연속 실패 t=${t.toFixed(2)}s (${this.lastError})`);
+    }
+  }
 
   _sample(t) {
     const t0 = performance.now();
@@ -179,6 +212,9 @@ SB.VisualSampler = class {
       컷: this.cuts,
       밝기급변: this.flashes,
       샘플비용_ms: this.cost.summary(),
+      실패: this.failures,
+      ...(this.lastError ? { 마지막오류: this.lastError } : {}),
+      ...(this.running ? {} : { 상태: '꺼짐' }),
       최근: recent,
     };
   }
