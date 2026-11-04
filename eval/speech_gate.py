@@ -172,6 +172,7 @@ def main() -> int:
     ap.add_argument("--split-dir", help="horror-dev.txt · horror-test.txt · neutral-dev.txt · neutral-test.txt")
     ap.add_argument("--model", default="_local/models/yamnet/yamnet.onnx")
     ap.add_argument("--theta", type=float, help="test 모드 전용 — 개발 세트에서 고른 값")
+    ap.add_argument("--annotator", default="B", help="이 주석자의 라벨만 쓴다 (기본 B — #35 B2 민감도 확인은 B2)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -186,7 +187,7 @@ def main() -> int:
     sd = Path(a.split_dir)
     hc = _clip_list(sd / f"horror-{a.mode}.txt")
     nc = _clip_list(sd / f"neutral-{a.mode}.txt")
-    truth = L.pick_annotator(L.load(a.labels), "B")
+    truth = L.pick_annotator(L.load(a.labels), a.annotator)
     yam, sr_exp, win_s, scare_idx = _yamnet(Path(a.model))
 
     thetas = [None] + (THETAS if a.mode == "dev" else [a.theta])
