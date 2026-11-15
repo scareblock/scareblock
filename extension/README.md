@@ -12,6 +12,9 @@
 3. **압축해제된 확장 프로그램을 로드** → 이 `extension/` 폴더 선택
 4. 유튜브 영상 페이지로 이동 — **홈·검색에서 클릭해 들어가도 된다**
 
+YAMNet(별도 문서 추론)까지 쓰려면 로드 **전에** 한 번 `bash extension/fetch-deps.sh`를 돌린다 —
+아래 「별도 문서 추론」. 안 돌려도 확장은 지금처럼 돈다(YAMNet만 꺼진다).
+
 > 콘텐츠 스크립트는 매치되는 URL로 **문서가 로드될 때만** 주입된다. 유튜브는 SPA라
 > 홈에서 영상을 클릭하면 문서 로드가 없으므로, `/watch`로만 매치하면 실사용 진입
 > 경로 대부분에서 확장이 아예 붙지 않는다. 그래서 `youtube.com` 전체로 매치하고
@@ -32,6 +35,8 @@ scareblock.blurNow()        // 지금 장면을 도달 전에 가린다
 scareblock.detections()     // 지금까지 낸 탐지 수
 scareblock.visual()         // 시각 특징 — 컷 · 밝기 급변 · 모션 (03단계, 기록만)
 scareblock.setSurge(5)      // 데모용 동작점 전환 (기본 20 = E1 동작점)
+scareblock.infer()          // 별도 문서 추론 — 왕복 시간 · 실패 수 · 오디오 탭 구간 · 콜백 비용
+await scareblock.yamnet()   // 1.5초 전부터 패치 하나의 Speech · 상위 5개 클래스 (확인용)
 scareblock.stop()           // 원복
 ```
 
@@ -92,6 +97,55 @@ node extension/test/visual.test.js   # 11/11 — 장면 교체는 컷, 페이드
 
 **아직 재지 않은 것** — 실제 유튜브에서의 샘플 비용(`샘플비용_ms`)과 M1 영향.
 `getImageData`가 동기 되읽기라 2fps에서도 확인이 필요하다.
+
+## 별도 문서 추론 (04단계)
+
+YAMNet(사이렌 · 말소리 기각 #40)을 브라우저에서 돌리기 위한 구조다. **이 단계는 길만 놓는다 —
+탐지 동작은 바꾸지 않는다.** 말소리 기각 규칙(θ = 0.1, #35 10.03)은 이 위에 개발 B가 붙인다.
+
+왜 따로 띄우나 — 확장 스크립트는 `<video>`와 오디오 그래프를 직접 잡아야 해서 **유튜브 페이지 안(MAIN world)** 에서 돈다.
+그래서 페이지 CSP를 그대로 받아 wasm을 올릴 수 없고 `chrome.*`도 없다. 추론은 확장 출처의 offscreen 문서에서 한다.
+
+```
+페이지(MAIN)                     중계(ISOLATED)          서비스 워커             offscreen 문서
+audio-tap ─16 kHz 패치─▶ infer-client ─window 메시지─▶ bridge ─ensure─▶ background ─create─▶ offscreen.js
+                                         ◀── 점수 521개 ── bridge ◀──── chrome.runtime 메시지 ────  (onnxruntime-web)
+```
+
+- **패치는 미디어 시각으로 자른다.** 오디오 탭은 규칙 탐지기와 같은 자리(지연 전 소스)에 물리고, 같은 원점 규칙
+  (첫 콜백 `currentTime` + 표본 수, 시크 · 배속 · 버퍼링 복귀에서 리셋)을 쓴다. 리샘플러는 필터 지연을 싣지 않아
+  출력 표본 k가 정확히 입력 시각 k/16000초다 — 탐지 onset부터 0.975초를 자르면 eval의 `speech_gate.gate()`와 같은 구간이다
+- **배속이면** 패치는 들리는 소리 0.975초다(미디어로는 0.975 × 배속초)
+- **실패는 null이다.** 모델이 없거나, offscreen이 안 뜨거나, 패치가 고리에서 밀려났거나, 기다리는 사이 시크했으면 null.
+  부르는 쪽은 null을 「검증 못 함 → 기각하지 않는다」로 처리한다(#40 클립 끝 처리와 같은 이유)
+- **모델이 없으면 비용 0.** 페이지는 offscreen에 상태를 먼저 묻고, `ready`일 때만 오디오 탭을 붙인다
+
+말소리 기각이 부를 것은 하나다:
+
+```js
+const s = await SB.yamnet?.scoresAt(onset);   // Float32Array(521) 또는 null
+s && s[0]                                     // Speech (AudioSet 클래스 0)
+```
+
+**준비** — 런타임과 모델은 저장소에 없다(`.gitignore`). MV3는 원격 코드를 못 불러오므로 확장 안에 둔다.
+
+```bash
+bash extension/fetch-deps.sh   # vendor/ ← onnxruntime-web 1.20.1 (npm) · models/ ← _local/models/yamnet/
+```
+
+모델은 `docs/yamnet-setup.md`로 만든 `_local/models/yamnet/yamnet.onnx`(eval이 쓰는 것과 같은 파일)를 복사한다.
+없으면 스크립트가 그 문서를 가리키고 멈춘다. 파일을 채운 뒤에는 `chrome://extensions`에서 확장을 **새로고침**한다.
+
+```bash
+node extension/test/pcm.test.js     # 13/13 — 리샘플이 시각을 밀지 않음 · 8 kHz 위를 접지 않음 · 고리 구간
+node extension/test/infer.test.js   # 11/11 — 가짜 chrome · ort로 페이지 → offscreen 왕복, 실패 시 null
+```
+
+**아직 실제 Chrome에서 확인하지 않았다.** 위 테스트는 메시지 모양과 시각 계산까지만 본다. 실기에서 볼 것:
+
+1. `scareblock.infer()`의 `클라이언트.성공`이 늘고 `왕복_ms` 중앙값이 패치 간격(0.48초)보다 충분히 작은지
+2. `await scareblock.yamnet()`이 말하는 장면에서 Speech가 높게 나오는지 — 같은 구간을 `eval.yamnet`으로 낸 값과 대조
+3. `탭.콜백평균_ms` — 탭이 메인 스레드 콜백을 하나 더 쓴다. M1 재측정(#48) 때 같이 잰다
 
 ## 렌더 시간 측정 (`--render-s`)
 
@@ -173,6 +227,11 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 | `detector-rule.js` | 규칙 탐지기. **계약 생산자** — `eval/detect.py`와 같은 계산 |
 | `detector-fake.js` | 10초마다 가짜 트리거 — M1 재측정용 (`DETECTOR: 'fake'`) |
 | `visual.js` | 시각 특징(컷 · 밝기 급변 · 모션). 2fps, 기록만 — 트리거를 내지 않는다 |
+| `pcm.js` | YAMNet 입력 — 16 kHz 리샘플러 · 미디어 시각 고리 · base64. 페이지 · 중계 · offscreen이 같이 쓴다 |
+| `audio-tap.js` | 지연 전 오디오를 16 kHz로 최근 8초 들고 있는다. 원점 규칙은 규칙 탐지기와 같다 |
+| `infer-client.js` | 페이지에서 별도 문서 추론을 부른다. 실패하면 null — 탐지를 막지 않는다 |
+| `bridge.js` | ISOLATED world 중계 — window 메시지 ↔ `chrome.runtime` |
+| `offscreen.js` · `../offscreen.html` · `../background.js` | offscreen 문서에서 YAMNet(onnxruntime-web)을 돌린다 · 서비스 워커가 띄운다 |
 | `main.js` | 조립 + 유튜브 SPA 네비게이션 대응 |
 
 프레임당 비용이 계측을 실제로 망가뜨리므로(#21) **매 렌더 프레임 도는 두 조회는
