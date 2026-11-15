@@ -59,8 +59,8 @@ ok('장면 교체는 컷이다', () => {
 ok('페이드(전역 밝기 이동)는 모션이 아니다', () => {
   const v = new VisualCore();
   v.push(grad(0, 40), 0);
-  const f = v.push(grad(0, 100), 0.5);              // 모든 픽셀 +60
-  assert.ok(Math.abs(f.dMean - 60 / 255) < 1e-6);
+  const f = v.push(grad(0, 120), 0.5);              // 모든 픽셀 +80 (≥ flash_mean 0.30)
+  assert.ok(Math.abs(f.dMean - 80 / 255) < 1e-6);
   assert.ok(f.flash, `dMean=${f.dMean}`);
   assert.ok(f.motion < 1e-6, `motion=${f.motion}`);
 });
