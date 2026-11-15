@@ -35,3 +35,7 @@ build/
 
 # git worktree 잔여물 — 레포 전체가 복사돼 있어 add -A 에 딸려가면 두 배가 된다
 wt*_path/
+
+# 확장 별도 문서 추론 — extension/fetch-deps.sh 가 채운다 (런타임 · 모델 이진 파일)
+extension/vendor/
+extension/models/

@@ -3,6 +3,15 @@
   "name": "scareblock",
   "version": "0.1.0",
   "description": "유튜브 영상을 3초 늦게 재생하고, 그 사이 트리거 장면을 찾아 도달 전에 가린다.",
+  "permissions": [
+    "offscreen"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -11,14 +20,28 @@
       "js": [
         "src/config.js",
         "src/samples.js",
+        "src/pcm.js",
         "src/visual.js",
         "src/ringbuffer.js",
         "src/player.js",
         "src/detector-fake.js",
         "src/detector-rule.js",
+        "src/audio-tap.js",
+        "src/infer-client.js",
         "src/main.js"
       ],
       "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "src/pcm.js",
+        "src/bridge.js"
+      ],
+      "world": "ISOLATED",
       "run_at": "document_idle"
     }
   ]
