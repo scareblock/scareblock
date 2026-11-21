@@ -1,0 +1,252 @@
+/**
+ * 별도 문서 추론 경로 검증 — 브라우저 없이 가짜 window · chrome · ort로 잇는다.
+ *   node extension/test/infer.test.js
+ *
+ * 페이지(infer-client) → 중계(bridge) → 서비스 워커(background) → offscreen 까지 메시지 모양이 맞는지,
+ * 오디오 탭이 패치를 미디어 시각으로 기다려 주는지, 어디가 빠져도 null로 끝나 탐지를 막지 않는지 본다.
+ * **실제 Chrome의 offscreen · wasm 로드는 여기서 보지 못한다** — README의 확인 절차로 본다.
+ */
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const v8 = require('v8');
+
+const src = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+
+// ── 가짜 window: 같은 window를 페이지와 중계가 같이 본다(실제로도 메시지는 같은 window로 오간다)
+global.window = global;
+global.location = { origin: 'https://www.youtube.com' };
+const winListeners = [];
+global.addEventListener = (t, fn) => { if (t === 'message') winListeners.push(fn); };
+global.removeEventListener = (t, fn) => {
+  const i = winListeners.indexOf(fn);
+  if (i >= 0) winListeners.splice(i, 1);
+};
+global.postMessage = (data, origin) => {
+  assert.strictEqual(origin, location.origin);
+  const d = v8.deserialize(v8.serialize(data));   // 구조화 복제 — 형식 배열이 그대로 건넌다
+  setTimeout(() => winListeners.slice().forEach((fn) => fn({ source: global, data: d })), 0);
+};
+
+// ── 가짜 chrome: 메시지는 모든 확장 문맥(서비스 워커 · offscreen)의 onMessage로 간다
+const rtListeners = [];
+const created = [];
+global.chrome = {
+  runtime: {
+    getURL: (p) => `chrome-extension://sb/${p}`,
+    onMessage: { addListener: (fn) => rtListeners.push(fn) },
+    sendMessage: (msg) => new Promise((resolve, reject) => {
+      const m = JSON.parse(JSON.stringify(msg));        // 실제처럼 JSON만 건넌다
+      let async = false;
+      for (const fn of rtListeners) if (fn(m, {}, resolve)) async = true;
+      if (!async) reject(new Error('Could not establish connection. Receiving end does not exist.'));
+    }),
+    getContexts: async () => created.map((u) => ({ documentUrl: u })),
+  },
+  offscreen: {
+    createDocument: async ({ url, reasons }) => {
+      assert.deepStrictEqual(reasons, ['WORKERS']);
+      created.push(url);
+      eval(src('src/offscreen.js'));                    // 문서가 뜨면 리스너가 걸린다
+    },
+  },
+};
+
+// ── 가짜 ort: 점수 0번(Speech) = 입력 절댓값 평균, 1번 = 입력 길이. 넘어온 파형을 확인할 수 있게
+let ortRuns = 0;
+global.ort = {
+  env: { wasm: {} },
+  Tensor: class { constructor(type, data, dims) { Object.assign(this, { type, data, dims }); } },
+  InferenceSession: {
+    create: async (url) => {
+      assert.ok(url.endsWith('models/yamnet.onnx'), url);
+      return {
+        inputNames: ['waveform'],
+        outputNames: ['scores', 'embeddings'],
+        run: async (feeds, outs) => {
+          ortRuns++;
+          assert.deepStrictEqual(outs, ['scores']);
+          const x = feeds.waveform.data;
+          const data = new Float32Array(2 * 521);         // 패치 2개라고 해도 첫 줄만 써야 한다
+          let s = 0;
+          for (const v of x) s += Math.abs(v);
+          data[0] = s / x.length;
+          data[1] = x.length;
+          data[521] = 99;
+          return { scores: { dims: [2, 521], data } };
+        },
+      };
+    },
+  },
+};
+global.fetch = async () => ({ text: async () => 'index,mid,display_name\n0,/m/09x0r,Speech\n1,/m/x,"Child speech, kid speaking"\n' });
+
+for (const f of ['src/pcm.js', 'src/infer-client.js', 'src/audio-tap.js', 'src/bridge.js', 'background.js']) eval(src(f));
+SB.log = () => {};
+
+let pass = 0, total = 0;
+const tests = [];
+const ok = (name, fn) => tests.push([name, fn]);
+
+ok('status — 서비스 워커가 offscreen을 띄우고 모델을 올린다', async () => {
+  const c = new SB.InferClient();
+  const st = await c.status();
+  assert.ok(st?.ready, JSON.stringify(st));
+  assert.strictEqual(created.length, 1);
+  assert.strictEqual(st.names[1], 'Child speech, kid speaking');
+  assert.strictEqual(ort.env.wasm.numThreads, 1);
+  c.dispose();
+});
+
+ok('yamnet — 파형이 손실 없이 건너가고 첫 패치 점수만 돌아온다', async () => {
+  const c = new SB.InferClient();
+  const pcm = Float32Array.from({ length: SB.YAMNET_WIN_N }, (_, i) => (i % 2 ? 0.25 : -0.25));
+  const s = await c.yamnet(pcm);
+  assert.ok(s instanceof Float32Array && s.length === 521);
+  assert.ok(Math.abs(s[0] - 0.25) < 1e-7, `s[0]=${s[0]}`);
+  assert.strictEqual(s[1], SB.YAMNET_WIN_N);
+  assert.strictEqual(created.length, 1, 'offscreen은 한 번만 띄운다');
+  assert.strictEqual(c.report().성공, 1);
+  c.dispose();
+});
+
+ok('yamnet — 길이가 패치 하나가 아니면 보내기 전에 던진다', async () => {
+  const c = new SB.InferClient();
+  await assert.rejects(() => c.yamnet(new Float32Array(16000)), /15600/);
+  c.dispose();
+});
+
+ok('offscreen이 실패를 답하면 null — 탐지 쪽은 「검증 못 함」으로 처리한다', async () => {
+  const c = new SB.InferClient();
+  const keep = ort.Tensor;
+  ort.Tensor = class { constructor() { throw new Error('wasm 터짐'); } };
+  const s = await c.yamnet(new Float32Array(SB.YAMNET_WIN_N));
+  ort.Tensor = keep;
+  assert.strictEqual(s, null);
+  assert.match(c.report().마지막오류, /wasm 터짐/);
+  c.dispose();
+});
+
+ok('중계가 없으면 시간 초과로 null', async () => {
+  const quiet = {
+    location, addEventListener() {}, removeEventListener() {}, postMessage() {},
+  };
+  const c = new SB.InferClient(quiet, 30);
+  assert.strictEqual(await c.call('status', {}, 30), null);
+  assert.strictEqual(await c.yamnet(new Float32Array(SB.YAMNET_WIN_N)), null);
+  assert.strictEqual(c.report().시간초과, 2);
+  c.dispose();
+});
+
+ok('중계는 모르는 op · 다른 출처 메시지를 무시한다', async () => {
+  const before = ortRuns;
+  let replies = 0;
+  const spy = (e) => { if (e.data?.dir === 'res') replies++; };
+  winListeners.push(spy);
+  postMessage({ tag: SB.INFER_TAG, dir: 'req', id: 1, op: 'eval', code: 'x' }, location.origin);
+  winListeners.forEach((fn) => fn({ source: {}, data: { tag: SB.INFER_TAG, dir: 'req', id: 2, op: 'status' } }));
+  await new Promise((r) => setTimeout(r, 20));
+  winListeners.splice(winListeners.indexOf(spy), 1);
+  assert.strictEqual(replies, 0);
+  assert.strictEqual(ortRuns, before);
+});
+
+// ── 오디오 탭: 가짜 오디오 그래프 · <video>
+function fakeAv(sr = 48000) {
+  const vl = {};
+  const video = {
+    currentTime: 50, playbackRate: 1, paused: false, seeking: false,
+    addEventListener: (t, fn) => { (vl[t] ||= []).push(fn); },
+    removeEventListener: (t, fn) => { vl[t] = (vl[t] || []).filter((f) => f !== fn); },
+    fire: (t) => (vl[t] || []).forEach((fn) => fn()),
+  };
+  let node = null;
+  const ac = {
+    sampleRate: sr, destination: {},
+    createScriptProcessor: () => (node = { connect() {}, disconnect() {} }),
+  };
+  const player = { audio: { ac, src: { connect() {}, disconnect() {} } } };
+  const feed = (sec, val = 0.1) => {
+    const n = 2048;
+    const buf = new Float32Array(n).fill(val);
+    for (let k = 0; k < Math.round((sec * sr) / n); k++) {
+      video.currentTime += n / sr;
+      node.onaudioprocess({ inputBuffer: { duration: n / sr, numberOfChannels: 1, getChannelData: () => buf } });
+    }
+  };
+  return { video, player, feed };
+}
+
+ok('탭 — 아직 안 들어온 패치는 기다렸다가 받는다', async () => {
+  const { video, player, feed } = fakeAv();
+  const tap = new SB.AudioTap(video, player);
+  tap.start();
+  feed(0.5);
+  const p = tap.patchAt(50.2);
+  assert.strictEqual(tap.waiters.length, 1);
+  feed(1.5);
+  const pcm = await p;
+  assert.ok(pcm && pcm.length === SB.YAMNET_WIN_N);
+  assert.ok(Math.abs(pcm[8000] - 0.1) < 1e-4, `${pcm[8000]}`);
+  assert.strictEqual(tap.waiters.length, 0);
+  assert.ok(tap.report().콜백평균_ms !== null);
+  tap.stop();
+});
+
+ok('탭 — 기다리는 중에 시크하면 null', async () => {
+  const { video, player, feed } = fakeAv();
+  const tap = new SB.AudioTap(video, player);
+  tap.start();
+  feed(0.5);
+  const p = tap.patchAt(50.3);
+  video.fire('seeked');
+  assert.strictEqual(await p, null);
+  tap.stop();
+});
+
+ok('탭 — 일시정지 뒤 재생은 리셋하지 않고, 버퍼링을 거친 재생만 리셋한다', async () => {
+  const { video, player, feed } = fakeAv();
+  const tap = new SB.AudioTap(video, player);
+  tap.start();
+  feed(0.5);
+  const g = tap.core.gen;
+  video.fire('playing');
+  assert.strictEqual(tap.core.gen, g);
+  video.fire('waiting');
+  video.fire('playing');
+  assert.notStrictEqual(tap.core.gen, g);
+  tap.stop();
+});
+
+ok('탭 — 시간 안에 안 들어오면 null', async () => {
+  const { video, player, feed } = fakeAv();
+  const tap = new SB.AudioTap(video, player);
+  tap.start();
+  feed(0.2);
+  assert.strictEqual(await tap.patchAt(60, 20), null);
+  tap.stop();
+});
+
+ok('SB.Yamnet — 미디어 시각 → 패치 → offscreen 점수까지 한 번에', async () => {
+  const { video, player, feed } = fakeAv(44100);
+  const tap = new SB.AudioTap(video, player);
+  tap.start();
+  const c = new SB.InferClient();
+  const y = new SB.Yamnet(tap, c);
+  feed(2.5, -0.3);
+  const s = await y.scoresAt(50.5);
+  assert.ok(s, c.report().마지막오류);
+  assert.ok(Math.abs(s[0] - 0.3) < 1e-3, `Speech 자리=${s[0]}`);
+  tap.stop();
+  c.dispose();
+});
+
+(async () => {
+  console.log('별도 문서 추론');
+  for (const [name, fn] of tests) {
+    total++;
+    try { await fn(); console.log(`  ✓ ${name}`); pass++; }
+    catch (e) { console.error(`  ✗ ${name}\n    ${e.stack}`); process.exitCode = 1; }
+  }
+  console.log(`${pass}/${total} 통과`);
+})();
