@@ -85,6 +85,8 @@ window.SB = window.SB || {};
       detections: () => detector.n,
       visual: () => visual?.report() ?? { 안내: '시각 특징이 꺼져 있다' },
       // 별도 문서 추론 상태 — 왕복 시간 · 실패 수 · 탭 구간
+      // 말소리 기각 — 받음 · 통과 · 기각 · 판정 없이 통과한 수와 최근 판정
+      speech: () => detector.gate?.report() ?? { 안내: '말소리 기각이 꺼져 있다(config.SPEECH_GATE)' },
       infer: () => ({ 클라이언트: infer?.report() ?? '꺼짐(config.YAMNET)', 탭: tap?.report() ?? '안 붙음' }),
       // 확인용: 미디어 시각 t(기본 지금보다 1.5초 전)부터 패치 하나의 상위 5개 클래스와 Speech
       yamnet: (t) => yamnetTop(t ?? video.currentTime - 1.5),

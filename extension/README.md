@@ -144,6 +144,7 @@ bash extension/fetch-deps.sh   # vendor/ ← onnxruntime-web 1.20.1 (npm) · mod
 ```bash
 node extension/test/pcm.test.js     # 13/13 — 리샘플이 시각을 밀지 않음 · 8 kHz 위를 접지 않음 · 고리 구간
 node extension/test/infer.test.js   # 11/11 — 가짜 chrome · ort로 페이지 → offscreen 왕복, 실패 시 null
+node extension/test/speech-gate.test.js   # 10/10 — 말소리 기각: 조건 둘 다 · 20개 클래스 = eval/yamnet.py · 판정 못 하면 그대로 가림
 ```
 
 **아직 실제 Chrome에서 확인하지 않았다.** 위 테스트는 메시지 모양과 시각 계산까지만 본다. 실기에서 볼 것:

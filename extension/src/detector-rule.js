@@ -165,6 +165,10 @@ SB.RuleDetector = class {
     this.player = player;
     this.params = params;
     this.n = 0;
+    // YAMNet이 안 붙으면 SB.yamnet이 null이라 판정 없이 그대로 낸다 — 지금까지와 같다
+    this.gate = SB.config.SPEECH_GATE && SB.SpeechGate
+      ? new SB.SpeechGate(() => SB.yamnet, (t) => this.player.addTriggers([t]))
+      : null;
   }
 
   start() {
@@ -217,13 +221,22 @@ SB.RuleDetector = class {
     const onset = this._anchor + d.onset * rate;
     const fire = this._anchor + d.fire * rate;
     this.n++;
-    this.player.addTriggers([{
+    const trig = {
       time: onset,
       category: 'jumpscare',
       confidence: Math.min(1, d.score),
       duration: SB.config.TRIGGER_TAIL_S,
       source: 'rule',
-    }]);
+    };
+    if (this.gate) {
+      // 말소리 기각: 판정이 끝나야 재생기에 넘긴다. onset 프레임은 currentTime이 onset + 지연에 닿을 때 화면에 나온다
+      const msLeft = ((onset + SB.config.DELAY_SEC) - this.video.currentTime) / rate * 1000;
+      this.gate.submit(trig, msLeft).then((r) => {
+        if (r === 'reject') SB.log(`  └ #${this.n} 말소리로 판정 — 가리지 않는다`);
+      });
+    } else {
+      this.player.addTriggers([trig]);
+    }
     SB.log(
       `규칙 탐지 #${this.n} onset=${onset.toFixed(2)}s fire=${fire.toFixed(2)}s ` +
       `(지금 ${this.video.currentTime.toFixed(2)}s) score=${d.score.toFixed(2)}` +
