@@ -3,6 +3,7 @@
 #
 #   vendor/  onnxruntime-web 1.20.1 (npm 공식 패키지) 중 wasm 실행에 쓰는 3개
 #   models/  YAMNet — docs/yamnet-setup.md로 만든 _local/models/yamnet/ 에서 복사
+#            CLIP  — _local/models/clip/ (eval/clip_zeroshot과 같은 파일) + 피 보강 모델 계수
 #
 # MV3는 원격 코드를 못 불러온다 — 런타임도 확장 안에 있어야 한다.
 #   bash extension/fetch-deps.sh
@@ -32,4 +33,29 @@ if [[ -f "$SRC/yamnet.onnx" ]]; then
 else
   echo "  ⚠ $SRC/yamnet.onnx 가 없다 — docs/yamnet-setup.md 대로 만든 뒤 이 스크립트를 다시 돌린다" >&2
   exit 1
+fi
+
+# CLIP ViT-B/32 이미지 쪽 — eval/clip_zeroshot이 쓰는 같은 파일(fp32, 352 MB). 없으면 CLIP만 꺼지고 나머지는 돈다.
+# heads(문장 임베딩 · logit_scale · 피 보강 모델 계수)는 numpy로 한 JSON으로 묶는다.
+CLIP_SRC="$ROOT/_local/models/clip"
+PROBE="${PROBE:-$ROOT/_local/dataset/blood-v3/probe.json}"   # eval/blood_probe train 결과 (#53)
+if [[ -f "$CLIP_SRC/visual.onnx" && -f "$CLIP_SRC/text_emb.npy" ]]; then
+  cp "$CLIP_SRC/visual.onnx" "$HERE/models/clip_visual.onnx"
+  python3 - "$CLIP_SRC" "$PROBE" "$HERE/models/clip_heads.json" <<'PY'
+import json, sys, numpy as np
+src, probe, out = sys.argv[1:4]
+meta = json.load(open(f"{src}/meta.json"))
+heads = dict(order=meta["order"], logit_scale=meta["logit_scale"], prompts=meta["prompts"],
+             weights_sha256=meta["weights_sha256"],
+             text_emb=np.load(f"{src}/text_emb.npy").astype(np.float32).tolist())
+try:
+    p = json.load(open(probe))
+    heads["probe"] = dict(cat="blood", coef=p["coef"], intercept=p["intercept"], C=p["C"])
+except FileNotFoundError:
+    print("  ⚠ 보강 모델 없음 — 피도 zero-shot으로 돈다", file=sys.stderr)
+json.dump(heads, open(out, "w"))
+PY
+  echo "  models/ ← clip_visual.onnx · clip_heads.json$( [[ -f "$PROBE" ]] && echo ' (피 보강 모델 포함)')"
+else
+  echo "  ⚠ $CLIP_SRC/visual.onnx 가 없다 — CLIP 없이 돈다" >&2
 fi

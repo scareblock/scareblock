@@ -59,6 +59,21 @@ global.ort = {
   Tensor: class { constructor(type, data, dims) { Object.assign(this, { type, data, dims }); } },
   InferenceSession: {
     create: async (url) => {
+      if (url.endsWith('models/clip_visual.onnx')) {
+        // 가짜 CLIP: 임베딩 = [입력 첫 값, 0, 0, 1, 0…] — 정규화된 픽셀이 건너왔는지 본다
+        return {
+          inputNames: ['pixels'],
+          outputNames: ['image_emb'],
+          run: async (feeds) => {
+            ortRuns++;
+            assert.deepStrictEqual(feeds.pixels.dims, [1, 3, 224, 224]);
+            const e = new Float32Array(512);
+            e[0] = feeds.pixels.data[0];
+            e[3] = 1;
+            return { image_emb: { dims: [1, 512], data: e } };
+          },
+        };
+      }
       assert.ok(url.endsWith('models/yamnet.onnx'), url);
       return {
         inputNames: ['waveform'],
@@ -79,9 +94,16 @@ global.ort = {
     },
   },
 };
-global.fetch = async () => ({ text: async () => 'index,mid,display_name\n0,/m/09x0r,Speech\n1,/m/x,"Child speech, kid speaking"\n' });
+// 가짜 heads: 문장 임베딩이 축 벡터라 cos가 임베딩 성분 그대로다 (blood=0번 · ordinary=3번)
+const unit = (i) => Array.from({ length: 512 }, (_, j) => (j === i ? 1 : 0));
+const HEADS = { order: ['blood', 'syringe', 'spider', 'ordinary'], logit_scale: 100,
+  text_emb: [unit(0), unit(1), unit(2), unit(3)], probe: { cat: 'blood', coef: unit(0), intercept: 0 } };
+let headsMissing = false;
+global.fetch = async (url) => (url.endsWith('clip_heads.json')
+  ? { ok: !headsMissing, json: async () => HEADS }
+  : { text: async () => 'index,mid,display_name\n0,/m/09x0r,Speech\n1,/m/x,"Child speech, kid speaking"\n' });
 
-for (const f of ['src/pcm.js', 'src/infer-client.js', 'src/audio-tap.js', 'src/bridge.js', 'background.js']) eval(src(f));
+for (const f of ['src/pcm.js', 'src/clip-prep.js', 'src/infer-client.js', 'src/audio-tap.js', 'src/bridge.js', 'background.js']) eval(src(f));
 SB.log = () => {};
 
 let pass = 0, total = 0;
@@ -124,6 +146,32 @@ ok('offscreen이 실패를 답하면 null — 탐지 쪽은 「검증 못 함」
   ort.Tensor = keep;
   assert.strictEqual(s, null);
   assert.match(c.report().마지막오류, /wasm 터짐/);
+  c.dispose();
+});
+
+ok('clip — 자른 RGB가 바이트 그대로 건너가 정규화되고, 점수가 돌아온다', async () => {
+  const c = new SB.InferClient();
+  const st = await c.clipStatus();
+  assert.ok(st?.ready && st.probe === 'blood', JSON.stringify(st));
+  const rgb = new Uint8Array(224 * 224 * 3);
+  rgb[0] = 255;                                       // 첫 픽셀 R
+  const r = await c.clip(rgb);
+  assert.ok(r, c.report().마지막오류);
+  const x0 = (1 - SB.CLIP_MEAN[0]) / SB.CLIP_STD[0];   // offscreen이 정규화한 첫 값
+  const n = Math.hypot(x0, 1);
+  const zs = 1 / (1 + Math.exp(-100 * (x0 / n - 1 / n)));
+  assert.ok(Math.abs(r.zs.blood - zs) < 1e-6, `zs.blood=${r.zs.blood} 기대 ${zs}`);
+  assert.ok(Math.abs(r.zs.spider - 1 / (1 + Math.exp(100 / n))) < 1e-6);
+  assert.ok(Math.abs(r.probe.blood - 1 / (1 + Math.exp(-x0 / n))) < 1e-6);
+  await assert.rejects(() => c.clip(new Uint8Array(10)), /224/);
+  c.dispose();
+});
+
+ok('clip — 중계는 모양이 틀린 rgb를 버리고 null로 끝난다', async () => {
+  const c = new SB.InferClient();
+  const r = await c.call('clip', { rgb: new Uint8Array(5) }, 500);
+  assert.strictEqual(r, null);
+  assert.match(c.report().마지막오류, /224×224×3/);
   c.dispose();
 });
 

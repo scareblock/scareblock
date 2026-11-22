@@ -6,7 +6,7 @@
  */
 (() => {
   const TAG = 'scareblock-infer';
-  const OPS = new Set(['status', 'yamnet']);
+  const OPS = new Set(['status', 'yamnet', 'clipStatus', 'clip']);
   let ready = null;    // offscreen을 띄우는 약속 — 실패하면 다음 요청에서 다시 시도한다
 
   function ensureOffscreen() {
@@ -32,6 +32,10 @@
       if (m.op === 'yamnet') {
         if (!(m.pcm instanceof Float32Array)) throw new Error('pcm이 Float32Array가 아니다');
         msg.pcm = SB.pcm.encode(m.pcm);
+      }
+      if (m.op === 'clip') {
+        if (!(m.rgb instanceof Uint8Array) || m.rgb.length !== 224 * 224 * 3) throw new Error('rgb가 224×224×3 Uint8Array가 아니다');
+        msg.rgb = SB.pcm.encodeBytes(m.rgb);
       }
       await ensureOffscreen();
       const r = await chrome.runtime.sendMessage(msg);

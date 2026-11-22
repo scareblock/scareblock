@@ -1,5 +1,5 @@
 /**
- * offscreen 문서 — YAMNet을 onnxruntime-web(wasm)으로 돌린다. 확장 출처라 유튜브 CSP를 받지 않는다.
+ * offscreen 문서 — YAMNet과 CLIP을 onnxruntime-web(wasm)으로 돌린다. 확장 출처라 유튜브 CSP를 받지 않는다.
  *
  * 모델은 `docs/yamnet-setup.md`로 만든 것과 같은 파일이다(`eval/`이 쓰는 것). 입력은 16 kHz 모노 파형,
  * 출력 `scores`는 [패치 수, 521]. 0.975초를 넣으면 패치가 하나라 첫 줄만 돌려준다.
@@ -72,14 +72,70 @@
     return { scores: Array.from(sc.data.subarray(0, n)), patches: sc.dims[0], ms };
   }
 
+  // ── CLIP ViT-B/32 (이미지 쪽) ─────────────────────────────────────────
+  // 모델은 eval/clip_zeroshot이 쓰는 _local/models/clip/visual.onnx와 같은 파일(fp32)이다 — 줄이면 점수가 달라져
+  // 오프라인에서 정한 θ가 맞지 않는다. heads는 문장 임베딩 · logit_scale · 피 보강 모델 계수(fetch-deps.sh가 만든다).
+  // YAMNet과 따로 올린다 — 하나가 없어도 다른 하나는 돈다.
+  const CLIP_MODEL = 'models/clip_visual.onnx';
+  const CLIP_HEADS = 'models/clip_heads.json';
+  const clipState = { ready: false, error: null, loadMs: null, runs: 0, runMs: [], probe: null };
+  let clipSession = null;
+  let clipHeads = null;
+  let clipLoading = null;
+
+  function loadClip() {
+    if (!clipLoading) {
+      clipLoading = (async () => {
+        if (typeof ort === 'undefined') throw new Error('onnxruntime-web이 없다 — extension/fetch-deps.sh를 돌린다');
+        if (!SB.clipNormalize) throw new Error('clip-prep.js가 안 올라왔다');
+        const t0 = performance.now();
+        ort.env.wasm.wasmPaths = chrome.runtime.getURL('vendor/');
+        ort.env.wasm.numThreads = 1;
+        const r = await fetch(chrome.runtime.getURL(CLIP_HEADS));
+        if (!r.ok) throw new Error(`${CLIP_HEADS} 없음 — fetch-deps.sh`);
+        clipHeads = await r.json();
+        clipSession = await ort.InferenceSession.create(chrome.runtime.getURL(CLIP_MODEL), {
+          executionProviders: ['wasm'],
+        });
+        clipState.probe = clipHeads.probe ? clipHeads.probe.cat : null;
+        clipState.loadMs = Math.round(performance.now() - t0);
+        clipState.ready = true;
+        clipState.error = null;
+      })().catch((e) => {
+        clipState.error = String(e?.message || e);
+        clipLoading = null;
+        throw e;
+      });
+    }
+    return clipLoading;
+  }
+
+  async function clip(b64) {
+    await loadClip();
+    const x = SB.clipNormalize(SB.pcm.decodeBytes(b64));
+    const t0 = performance.now();
+    const out = await clipSession.run({ [clipSession.inputNames[0]]: new ort.Tensor('float32', x, [1, 3, 224, 224]) });
+    const emb = out[clipSession.outputNames[0]].data;
+    const ms = performance.now() - t0;
+    clipState.runs++;
+    clipState.runMs.push(Math.round(ms));
+    if (clipState.runMs.length > 50) clipState.runMs.shift();
+    return { ...SB.clipHeads(emb, clipHeads), ms };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.to !== 'sb-offscreen') return false;
     const run = msg.op === 'yamnet' ? () => yamnet(msg.pcm)
-      : msg.op === 'status' ? async () => {
-        await load().catch(() => {});
-        return { ...state, classes: state.classes ? state.classes.length : null, names: state.classes };
-      }
-        : null;
+      : msg.op === 'clip' ? () => clip(msg.rgb)
+        : msg.op === 'status' ? async () => {
+          await load().catch(() => {});
+          return { ...state, classes: state.classes ? state.classes.length : null, names: state.classes };
+        }
+          : msg.op === 'clipStatus' ? async () => {
+            await loadClip().catch(() => {});
+            return { ...clipState };
+          }
+            : null;
     if (!run) return false;
     queue = queue.then(run).then(
       (result) => sendResponse({ ok: true, result }),

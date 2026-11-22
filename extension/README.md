@@ -12,8 +12,8 @@
 3. **압축해제된 확장 프로그램을 로드** → 이 `extension/` 폴더 선택
 4. 유튜브 영상 페이지로 이동 — **홈·검색에서 클릭해 들어가도 된다**
 
-YAMNet(별도 문서 추론)까지 쓰려면 로드 **전에** 한 번 `bash extension/fetch-deps.sh`를 돌린다 —
-아래 「별도 문서 추론」. 안 돌려도 확장은 지금처럼 돈다(YAMNet만 꺼진다).
+YAMNet · CLIP(별도 문서 추론)까지 쓰려면 로드 **전에** 한 번 `bash extension/fetch-deps.sh`를 돌린다 —
+아래 「별도 문서 추론」 · 「CLIP 시각 경로」. 안 돌려도 확장은 지금처럼 돈다(그 둘만 꺼진다).
 
 > 콘텐츠 스크립트는 매치되는 URL로 **문서가 로드될 때만** 주입된다. 유튜브는 SPA라
 > 홈에서 영상을 클릭하면 문서 로드가 없으므로, `/watch`로만 매치하면 실사용 진입
@@ -37,6 +37,7 @@ scareblock.visual()         // 시각 특징 — 컷 · 밝기 급변 · 모션 
 scareblock.setSurge(5)      // 데모용 동작점 전환 (기본 20 = E1 동작점)
 scareblock.infer()          // 별도 문서 추론 — 왕복 시간 · 실패 수 · 오디오 탭 구간 · 콜백 비용
 await scareblock.yamnet()   // 1.5초 전부터 패치 하나의 Speech · 상위 5개 클래스 (확인용)
+scareblock.clip()           // CLIP — 프레임 수 · 건너뜀 · 늦음 · 왕복 시간 · 최근 점수 · 종류별 트리거
 scareblock.stop()           // 원복
 ```
 
@@ -143,7 +144,7 @@ bash extension/fetch-deps.sh   # vendor/ ← onnxruntime-web 1.20.1 (npm) · mod
 
 ```bash
 node extension/test/pcm.test.js     # 13/13 — 리샘플이 시각을 밀지 않음 · 8 kHz 위를 접지 않음 · 고리 구간
-node extension/test/infer.test.js   # 11/11 — 가짜 chrome · ort로 페이지 → offscreen 왕복, 실패 시 null
+node extension/test/infer.test.js   # 13/13 — 가짜 chrome · ort로 페이지 → offscreen 왕복(YAMNet · CLIP), 실패 시 null
 ```
 
 **아직 실제 Chrome에서 확인하지 않았다.** 위 테스트는 메시지 모양과 시각 계산까지만 본다. 실기에서 볼 것:
@@ -222,6 +223,35 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 경쟁하는 것으로 보인다 — 첫 줄과 나머지의 차이지만 각 1회라 인과는 확정하지 않는다.
 **`main`(가짜 탐지기)과의 대조는 하지 않았다** — 탐지가 도는 92초 동안 끊김이 0이라 가릴 것이 남지 않았다.
 
+## CLIP 시각 경로 (04단계 · 피 · 거미 · 주사기)
+
+`eval/clip_zeroshot`(#51)과 피 보강 모델(#53)을 **같은 계산 그대로** 확장에 옮겼다. 정의도 같다 —
+1초에 한 장, 프레임 t의 점수가 θ 이상이면 `[t, t+1)`을 가린다.
+
+```
+<video>(지연 전) ─rVFC 1fps─▶ 원본 크기 캔버스 ─clipCrop(PIL과 같은 축소 · 자르기)─▶ 224×224 RGB 150 KB
+   ─ infer-client ─▶ bridge ─▶ offscreen: clipNormalize → CLIP(onnx) → clipHeads ─▶ {zs, probe} ─▶ clipDecide ─▶ 트리거
+```
+
+- **θ는 오프라인에서 정한 그대로다**(config `CLIP_THETA` · `CLIP_PROBE_THETA`, neutral-dev 5%). 바꾸면 #35에 보고한 숫자와 달라진다
+- **피는 보강 모델**이 `models/clip_heads.json`에 있으면 그것을, 없으면 zero-shot을 쓴다. 거미 · 주사기는 zero-shot
+- **모델은 eval과 같은 fp32 파일(352 MB)이다.** 줄이면(int8 등) 점수가 달라져 θ가 맞지 않는다
+- **한 번에 한 장만 보낸다.** 앞 장이 안 끝났으면 그 프레임은 건너뛴다(`건너뜀`). 응답이 없으면 가리지 않는다
+- **비용** (실제 브라우저, onnxruntime-web 1.20.1 wasm 1스레드): 페이지 자르기 16–23 ms · 추론 약 230 ms/장.
+  offscreen은 한 스레드라 CLIP이 도는 동안 YAMNet 요청이 최대 그만큼 기다린다 — 말소리 거르기(#52)는 시간이 모자라면 그냥 가린다
+
+**같은 점수가 나오는지** — 세 겹으로 본다.
+
+```bash
+node extension/test/clip-prep.test.js      # 12/12 — 같은 RGB → PIL과 같은 바이트 · 같은 텐서
+node extension/test/clip-sampler.test.js   # 7/7 — 판정 + 저장된 임베딩 → eval 점수와 같다(zero-shot · 보강 모델)
+# 실제 브라우저 wasm: extension/test/clip-browser.html (파일 안 주석대로 띄운다)
+#   c018 두 프레임 — eval 점수와 최대 차이 1.3e-5
+```
+
+**아직 실제 유튜브 위에서 확인하지 않았다.** 볼 것: `scareblock.clip()`의 `건너뜀` · `늦음`이 0 근처인지,
+피 · 거미 장면에서 트리거가 나는지, M1 렌더 지표가 CLIP을 켠 뒤에도 그대로인지.
+
 ## 구조
 
 | 파일 | 역할 |
@@ -232,11 +262,13 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 | `detector-rule.js` | 규칙 탐지기. **계약 생산자** — `eval/detect.py`와 같은 계산 |
 | `detector-fake.js` | 10초마다 가짜 트리거 — M1 재측정용 (`DETECTOR: 'fake'`) |
 | `visual.js` | 시각 특징(컷 · 밝기 급변 · 모션). 2fps, 기록만 — 트리거를 내지 않는다 |
-| `pcm.js` | YAMNet 입력 — 16 kHz 리샘플러 · 미디어 시각 고리 · base64. 페이지 · 중계 · offscreen이 같이 쓴다 |
+| `pcm.js` | YAMNet 입력 — 16 kHz 리샘플러 · 미디어 시각 고리 · base64(CLIP 바이트도). 페이지 · 중계 · offscreen이 같이 쓴다 |
 | `audio-tap.js` | 지연 전 오디오를 16 kHz로 최근 8초 들고 있는다. 원점 규칙은 규칙 탐지기와 같다 |
 | `infer-client.js` | 페이지에서 별도 문서 추론을 부른다. 실패하면 null — 탐지를 막지 않는다 |
 | `bridge.js` | ISOLATED world 중계 — window 메시지 ↔ `chrome.runtime` |
-| `offscreen.js` · `../offscreen.html` · `../background.js` | offscreen 문서에서 YAMNet(onnxruntime-web)을 돌린다 · 서비스 워커가 띄운다 |
+| `offscreen.js` · `../offscreen.html` · `../background.js` | offscreen 문서에서 YAMNet · CLIP(onnxruntime-web)을 돌린다 · 서비스 워커가 띄운다 |
+| `clip-prep.js` | CLIP 전처리(PIL과 같은 바이트) · 점수 계산(zero-shot · 보강 모델). 페이지와 offscreen이 같이 쓴다 |
+| `clip-sampler.js` | 1fps로 지연 전 프레임을 잘라 보내고, θ를 넘으면 트리거를 낸다. **계약 생산자** |
 | `main.js` | 조립 + 유튜브 SPA 네비게이션 대응 |
 
 프레임당 비용이 계측을 실제로 망가뜨리므로(#21) **매 렌더 프레임 도는 두 조회는
