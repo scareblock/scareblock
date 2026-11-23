@@ -38,7 +38,8 @@ fi
 # CLIP ViT-B/32 이미지 쪽 — eval/clip_zeroshot이 쓰는 같은 파일(fp32, 352 MB). 없으면 CLIP만 꺼지고 나머지는 돈다.
 # heads(문장 임베딩 · logit_scale · 피 보강 모델 계수)는 numpy로 한 JSON으로 묶는다.
 CLIP_SRC="$ROOT/_local/models/clip"
-PROBE="${PROBE:-$ROOT/_local/dataset/blood-v3/probe.json}"   # eval/blood_probe train 결과 (#53)
+# eval/blood_probe train 결과 (#53). 리사이즈를 버림으로 고친 뒤 다시 학습한 것 — config.CLIP_PROBE_THETA와 짝이다
+PROBE="${PROBE:-$ROOT/_local/dataset/resize-1123/probe.json}"
 if [[ -f "$CLIP_SRC/visual.onnx" && -f "$CLIP_SRC/text_emb.npy" ]]; then
   cp "$CLIP_SRC/visual.onnx" "$HERE/models/clip_visual.onnx"
   python3 - "$CLIP_SRC" "$PROBE" "$HERE/models/clip_heads.json" <<'PY'

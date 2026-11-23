@@ -234,6 +234,8 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 ```
 
 - **θ는 오프라인에서 정한 그대로다**(config `CLIP_THETA` · `CLIP_PROBE_THETA`, neutral-dev 5%). 바꾸면 #35에 보고한 숫자와 달라진다
+  - 리사이즈를 torchvision처럼 **버림**으로 고친 뒤(#51 리뷰 1) 피 보강 모델을 다시 학습해 `CLIP_PROBE_THETA`가 0.05835 → **0.05868**로 바뀌었다.
+    zero-shot θ는 그대로다(neutral 클립이 전부 16:9라 점수가 같다). 다시 낸 임베딩 · 점수 · `probe.json`은 `_local/dataset/resize-1123/`
 - **피는 보강 모델**이 `models/clip_heads.json`에 있으면 그것을, 없으면 zero-shot을 쓴다. 거미 · 주사기는 zero-shot
 - **모델은 eval과 같은 fp32 파일(352 MB)이다.** 줄이면(int8 등) 점수가 달라져 θ가 맞지 않는다
 - **한 번에 한 장만 보낸다.** 앞 장이 안 끝났으면 그 프레임은 건너뛴다(`건너뜀`). 응답이 없으면 가리지 않는다
@@ -243,8 +245,9 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 **같은 점수가 나오는지** — 세 겹으로 본다.
 
 ```bash
-node extension/test/clip-prep.test.js      # 12/12 — 같은 RGB → PIL과 같은 바이트 · 같은 텐서
+node extension/test/clip-prep.test.js      # 18/18 — 같은 RGB → PIL과 같은 바이트 · 같은 텐서 (16:9 아닌 크기 포함)
 node extension/test/clip-sampler.test.js   # 7/7 — 판정 + 저장된 임베딩 → eval 점수와 같다(zero-shot · 보강 모델)
+# 모델 · _local이 없으면 대조를 건너뛰고 「건너뜀」이라고 쓴다 — 그때의 「통과」는 판정 로직만 본 것이다
 # 실제 브라우저 wasm: extension/test/clip-browser.html (파일 안 주석대로 띄운다)
 #   c018 두 프레임 — eval 점수와 최대 차이 1.3e-5
 ```

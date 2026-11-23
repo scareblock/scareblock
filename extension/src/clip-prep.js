@@ -113,11 +113,12 @@ SB.CLIP_STD = [0.26862954, 0.26130258, 0.27577711];
     return f % 2 === 0 ? f : f + 1;
   };
 
-  /** 짧은 변 224로 줄였을 때의 크기. `eval/clip_zeroshot.preprocess`와 같은 반올림 */
-  SB.clipResizeSize = (w, h, s = SB.CLIP_SIZE) => {
-    const scale = s / Math.min(w, h);
-    return [roundHalfEven(w * scale), roundHalfEven(h * scale)];
-  };
+  /**
+   * 짧은 변 224로 줄였을 때의 크기. `eval/clip_zeroshot.resize_size` = torchvision `Resize(224)`와 같다 —
+   * 짧은 변은 정확히 224, 긴 변은 `int(224 · 긴 변 / 짧은 변)`(버림). 반올림하면 854×480(유튜브 480p)에서 1px 갈린다 (#51 리뷰 1)
+   */
+  SB.clipResizeSize = (w, h, s = SB.CLIP_SIZE) => (
+    w <= h ? [s, Math.trunc((s * h) / w)] : [Math.trunc((s * w) / h), s]);
 
   /**
    * RGB(w×h) → 줄이고 가운데를 자른 RGB Uint8Array [224·224·3] (HWC).

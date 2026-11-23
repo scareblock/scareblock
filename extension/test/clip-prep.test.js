@@ -19,13 +19,12 @@ const PY = `
 import sys, json, numpy as np
 from PIL import Image
 sys.path.insert(0, sys.argv[1])
-from eval.clip_zeroshot import preprocess
+from eval.clip_zeroshot import preprocess, resize_size
 w, h, f = int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 rgb = np.fromfile(f, np.uint8).reshape(h, w, 3)
 meta = json.load(open(sys.argv[5]))
 im = Image.fromarray(rgb)
-s = meta["size"]; sc = s / min(w, h)
-r = np.asarray(im.resize((round(w * sc), round(h * sc)), Image.BICUBIC))
+r = np.asarray(im.resize(resize_size(w, h, meta["size"]), Image.BICUBIC))
 r.tofile(f + ".resized")
 preprocess(rgb, meta).astype(np.float32).tofile(f + ".tensor")
 print(r.shape[1], r.shape[0])
@@ -60,11 +59,15 @@ console.log('CLIP 전처리 = PIL');
 
 let havePy = true;
 try { execFileSync('python3', ['-c', 'import PIL, numpy'], { stdio: 'ignore' }); } catch { havePy = false; }
+let skipped = '';
 if (!havePy || !fs.existsSync(META)) {
-  console.log('  - 파이썬(PIL · numpy) 또는 _local/models/clip/meta.json이 없어 건너뛴다');
+  skipped = '파이썬(PIL · numpy) 또는 _local/models/clip/meta.json 없음';
+  console.log(`  - ${skipped} — 건너뛴다`);
 } else {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-clip-'));
-  for (const [w, h, seed] of [[1280, 720, 1], [640, 360, 2], [854, 480, 3], [300, 500, 4], [224, 224, 5], [1920, 1080, 6]]) {
+  // 16:9가 아닌 것(854×480 · 640×480 · 1280×536 · 세로)은 반올림과 버림이 갈리는 크기다 (#51 리뷰 1)
+  for (const [w, h, seed] of [[1280, 720, 1], [640, 360, 2], [854, 480, 3], [300, 500, 4], [224, 224, 5], [1920, 1080, 6],
+    [640, 480, 7], [1280, 536, 8], [360, 640, 9]]) {
     const rgb = image(w, h, seed);
     const f = path.join(dir, `${w}x${h}.rgb`);
     fs.writeFileSync(f, rgb);
@@ -90,4 +93,5 @@ if (!havePy || !fs.existsSync(META)) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-console.log(`\n${pass}/${total} 통과`);
+// 건너뛰었으면 「통과」라고 쓰지 않는다 — 아무것도 안 본 것이다
+console.log(skipped ? `\n${pass}/${total} 통과 · PIL 대조 건너뜀 (${skipped})` : `\n${pass}/${total} 통과`);

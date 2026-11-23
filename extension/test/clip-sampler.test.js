@@ -20,7 +20,8 @@ const ok = (name, fn) => {
   total++;
   try { fn(); console.log(`  ✓ ${name}`); pass++; } catch (e) { console.log(`  ✗ ${name}\n    ${e.message}`); }
 };
-const skip = (name, why) => console.log(`  - ${name} (건너뜀: ${why})`);
+let skipped = 0;
+const skip = (name, why) => { skipped++; console.log(`  - ${name} (건너뜀: ${why})`); };
 
 console.log('CLIP 시각 경로');
 
@@ -68,9 +69,11 @@ ok('rgbaToRgb · clipCrop — 크기와 채널', () => {
 // ── 오프라인 점수와 같은가 ───────────────────────────────────────────
 const ROOT = path.join(__dirname, '../..');
 const HEADS = path.join(__dirname, '../models/clip_heads.json');
-const EMB = path.join(ROOT, '_local/dataset/V-1110/clip-emb');
-const ZS = path.join(ROOT, '_local/dataset/V-1110/clip-scores');
-const PR = path.join(ROOT, '_local/dataset/blood-v3/probe-scores');
+// 리사이즈를 버림으로 고친 뒤(#51 리뷰 1) 다시 낸 임베딩 · 점수. fetch-deps.sh의 보강 모델도 여기 probe.json이다
+const DATA = path.join(ROOT, '_local/dataset/resize-1123');
+const EMB = path.join(DATA, 'clip-emb');
+const ZS = path.join(DATA, 'clip-scores');
+const PR = path.join(DATA, 'probe-scores');
 
 /** 아주 작은 .npy 읽기 — float32 2차원 (C 순서) */
 function readNpy(f) {
@@ -107,7 +110,9 @@ else if (!fs.existsSync(EMB)) skip('heads 일치', '_local 임베딩 없음');
 else {
   const heads = JSON.parse(fs.readFileSync(HEADS, 'utf8'));
   const CATS = ['blood', 'syringe', 'spider'];
-  const ids = fs.readdirSync(EMB).filter((f) => f.endsWith('.npy')).map((f) => f.slice(0, -4)).slice(0, 8);
+  const all = fs.readdirSync(EMB).filter((f) => f.endsWith('.npy')).map((f) => f.slice(0, -4));
+  // 앞 8개 + 16:9가 아닌 클립(리사이즈가 바뀐 것) — c034는 피 보강 모델의 양성 클립이다
+  const ids = [...new Set([...all.slice(0, 8), ...['c034', 'c041'].filter((c) => all.includes(c))])];
 
   ok(`zero-shot — eval 점수와 같다 (클립 ${ids.length}개)`, () => {
     let worst = 0, n = 0;
@@ -149,5 +154,5 @@ else {
   }
 }
 
-console.log(`${pass}/${total} 통과`);
+console.log(skipped ? `${pass}/${total} 통과 · ${skipped}개 건너뜀` : `${pass}/${total} 통과`);
 process.exit(pass === total ? 0 : 1);
