@@ -108,7 +108,13 @@ def vis_events(label_csvs: list[str], scores_dir: str, render_s: float = RENDER_
     from . import labels as L
     out, seen, cache = [], set(), {}
     for f in label_csvs:
-        for x in L.pick_annotator(L.load(f), annotator):
+        allx = L.load(f)
+        mine = L.pick_annotator(allx, annotator)
+        # 주석자가 안 맞는 파일(열이 없거나 다른 사람)은 시각 사건이 조용히 0건이 된다 — 알린다 (#55 재리뷰 7)
+        print(f"  {Path(f).name}: 라벨 {len(allx)}건 중 주석자 {annotator} {len(mine)}건", file=sys.stderr)
+        if allx and not mine:
+            print(f"  ⚠ {Path(f).name}에 주석자 {annotator}의 라벨이 없다 — 있는 것: {L.annotators(allx)}", file=sys.stderr)
+        for x in mine:
             if x.category not in THETA or x.ambiguous:
                 continue
             key = (x.clip_id, x.category, x.onset, x.offset)
@@ -249,14 +255,15 @@ def _selftest() -> int:
             pass
     # 시각 라벨: 주석자 하나만 · ambiguous는 labels._to_bool 규칙(yes · 1 등) · 합본 중복은 한 번
     import tempfile
-    d = Path(tempfile.mkdtemp())
-    np.savez(d / "c1.npz", p=np.array([[0.0, 0, 0], [0.9, 0, 0], [0.9, 0, 0]]), cats=np.array(CATS))
-    head = "video_id,clip_id,onset,offset,category,ambiguous,annotator\n"
-    (d / "V.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\nv,c1,0.5,2.5,blood,yes,B\n"
-                             "v,c1,0.6,2.4,blood,false,A\n", encoding="utf-8")
-    (d / "V2.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\n", encoding="utf-8")
-    ev = vis_events([str(d / "V.csv"), str(d / "V2.csv")], str(d), render_s=0.0)
-    assert [(e.clip_id, e.onset, e.d) for e in ev] == [("c1", 0.5, 0.5)], ev
+    with tempfile.TemporaryDirectory() as td:   # #55 재리뷰 8 — 끝나면 지운다
+        d = Path(td)
+        np.savez(d / "c1.npz", p=np.array([[0.0, 0, 0], [0.9, 0, 0], [0.9, 0, 0]]), cats=np.array(CATS))
+        head = "video_id,clip_id,onset,offset,category,ambiguous,annotator\n"
+        (d / "V.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\nv,c1,0.5,2.5,blood,yes,B\n"
+                                 "v,c1,0.6,2.4,blood,false,A\n", encoding="utf-8")
+        (d / "V2.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\n", encoding="utf-8")
+        ev = vis_events([str(d / "V.csv"), str(d / "V2.csv")], str(d), render_s=0.0)
+        assert [(e.clip_id, e.onset, e.d) for e in ev] == [("c1", 0.5, 0.5)], ev
     render(s)
     print("e3 selftest ok")
     return 0
