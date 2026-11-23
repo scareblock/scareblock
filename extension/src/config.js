@@ -14,7 +14,7 @@ SB.config = {
   VISUAL_FPS: 2,         // 시각 특징 샘플링 — CLIP과 같은 1~2fps 전제 (README 「모델이 아닌 것」)
   YAMNET: true,          // 별도 문서 추론. offscreen이 준비됐다고 답할 때만 오디오 탭을 붙인다 — 모델이 없으면 비용 0
   SPEECH_GATE: true,     // 말소리 기각(#40). YAMNet이 없으면 판정 없이 그대로 가린다
-  CLIP: true,            // 피 · 거미 · 주사기. offscreen에 CLIP이 올라왔을 때만 샘플러를 붙인다
+  CLIP: false,           // E5 실험 빌드 — 꺼 둔다(#35 11.23: c019 · c004에서 점프 스케어가 아닌 장면까지 가리면 결과가 섞인다). main은 true
   CLIP_FPS: 1,           // eval/clip_zeroshot과 같은 1초에 한 장
   CLIP_CATS: ['blood', 'spider', 'syringe'],
   // θ — neutral-dev 프레임의 5%만 가리는 값 (#35 04단계 · 라벨 보기 전 고정). 바꾸면 보고한 숫자와 달라진다
