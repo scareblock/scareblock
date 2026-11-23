@@ -85,17 +85,16 @@ bash extension/fetch-deps.sh     # models/ ← clip_visual.onnx · clip_heads.js
 
 `clip_heads.json`은 `text_emb.npy` · `meta.json`과 **피 보강 모델 계수**(`probe.json`)를 묶은 것이다.
 
-- **보강 모델이 없으면 피도 zero-shot으로 돈다.** 스크립트가 「⚠ 보강 모델 없음」을 찍고, 거미 · 주사기 · 피 모두
-  zero-shot 기준값(`config.CLIP_THETA`)으로 판정한다. 확장 동작 확인(프레임 · 건너뜀 · 트리거)에는 이것으로 충분하다
-- 보강 모델까지 넣으려면 `probe.json`(약 12 KB)이 있어야 한다. 학습에 라벨 · 영상(`_local/dataset`)이 필요해서
-  **수현에게 파일을 받아** 다음처럼 넘긴다
+- **보강 모델은 저장소에 있다** — `extension/data/blood_probe.json`(약 12 KB). 스크립트가 기본으로 이것을 묶는다.
+  가중치 512개 · 절편 · 학습 설정(C, 교차 검증 손실, 클립 번호)뿐이고 라벨이나 영상은 들어 있지 않다.
+  리사이즈를 고친 뒤(#51) 다시 학습한 것이라 `config.CLIP_PROBE_THETA`(0.05868)와 짝이 맞다 (`C` = 10, `intercept` −6.674…)
+- 다시 학습했으면(`eval/blood_probe train`, 라벨 · 영상 필요) 그 파일을 넘긴다
 
   ```bash
-  PROBE=/받은/위치/probe.json bash extension/fetch-deps.sh
+  PROBE=/다시/학습한/probe.json bash extension/fetch-deps.sh
   ```
 
-  `probe.json`은 리사이즈를 고친 뒤(#51) 다시 학습한 것이어야 `config.CLIP_PROBE_THETA`(0.05868)와 짝이 맞다
-  (`C` = 10, `intercept` −6.674…)
+- 파일이 없으면 피도 zero-shot으로 돈다. 스크립트가 「⚠ 보강 모델 없음」을 찍고 모든 종류를 `config.CLIP_THETA`로 판정한다
 
 그다음 `chrome://extensions`에서 확장을 새로고침한다. 첫 로드는 모델이 커서 몇 초 걸린다.
 실기 확인 절차는 `extension/README.md` 「CLIP 시각 경로」에 있다.
