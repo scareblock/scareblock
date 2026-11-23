@@ -112,20 +112,43 @@ def _fit(X, y, C):
 
 
 def _read_ids(path: str) -> set[str]:
-    """clip_id 목록 — CSV(clip_id 열)든 공백 구분 텍스트든."""
-    txt = Path(path).read_text()
-    if txt.startswith("clip_id"):
-        return {r["clip_id"] for r in csv.DictReader(open(path))}
-    return set(txt.split())
+    """clip_id 목록 — CSV(clip_id 열)든 공백 구분 텍스트든. 형식을 못 알아보면 **멈춘다** (#53 재리뷰).
+
+    가드가 형식을 잘못 알면 학습 클립과 절대 안 겹쳐 조용히 통과한다 — 그래서 애매하면 통과시키지 않는다.
+      · 첫 줄에 `,`가 있으면 CSV. `clip_id` 열이 없으면 멈춘다 (labels 파일처럼 첫 열이 video_id여도 열 이름으로 읽는다)
+      · 아니면 공백 구분. 토큰에 `,`가 섞여 있으면 멈춘다
+      · 읽은 ID가 0개면 멈춘다
+    BOM은 utf-8-sig로 연다.
+    """
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        txt = fh.read()
+    first = txt.split("\n", 1)[0]
+    if "," in first:
+        rows = list(csv.DictReader(txt.splitlines()))
+        if not rows or "clip_id" not in rows[0]:
+            raise SystemExit(f"{path}: CSV인데 clip_id 열이 없다 (첫 줄: {first.strip()!r})")
+        ids = {r["clip_id"].strip() for r in rows if r["clip_id"].strip()}
+    else:
+        ids = set(txt.split())
+        bad = sorted(t for t in ids if "," in t)
+        if bad:
+            raise SystemExit(f"{path}: 공백 구분 목록에 `,`가 섞여 있다 — {bad[:3]}")
+    if not ids:
+        raise SystemExit(f"{path}: 클립 ID가 하나도 없다")
+    return ids
 
 
 def cmd_train(a) -> None:
     from sklearn.metrics import log_loss
     train_ids = {r["clip_id"] for f in a.clips for r in csv.DictReader(open(f))}
+    if not a.exclude:
+        print("  ⚠ --exclude 없음 — 학습 클립이 neutral-dev · neutral-test · V3와 겹치는지 보지 않는다 (등록 조건)",
+              file=sys.stderr)
     for f in a.exclude or []:
         both = sorted(train_ids & _read_ids(f))
-        # neutral-dev · neutral-test · V3는 학습에 쓰지 않는다 (등록) — 겹치면 멈춘다 (#53 리뷰 2)
-        assert not both, f"학습 클립이 {f}와 겹친다: {both}"
+        # neutral-dev · neutral-test · V3는 학습에 쓰지 않는다 (등록) — 겹치면 멈춘다. assert가 아니다(-O에서도 돈다)
+        if both:
+            raise SystemExit(f"학습 클립이 {f}와 겹친다: {both}")
     X, y, g = load_train(Path(a.emb), a.labels, a.clips)
     clips = sorted(set(g))
     pos_clips = sorted({c for c in clips if y[g == c].any()})
@@ -143,7 +166,8 @@ def cmd_train(a) -> None:
                 continue
             m = _fit(X[tr], y[tr], C)
             losses.append(log_loss(y[te], m.predict_proba(X[te])[:, 1], labels=[0, 1]))
-        assert losses, f"C = {C}: 돌릴 수 있는 겹이 없다 (양성이 한쪽에 몰렸다)"
+        if not losses:
+            raise SystemExit(f"C = {C}: 돌릴 수 있는 겹이 없다 (양성이 한쪽에 몰렸다)")
         cv[C] = float(np.mean(losses))
     best = min(C_GRID, key=lambda c: (cv[c], c))
     m = _fit(X, y, best)
@@ -166,7 +190,8 @@ def cmd_score(a) -> None:
         with np.errstate(over="ignore"):
             p = 1.0 / (1.0 + np.exp(-(e @ w + b)))
         zs = np.load(Path(a.zs) / f"{cid}.npz")["p"].copy()
-        assert len(zs) == len(p), cid
+        if len(zs) != len(p):
+            raise SystemExit(f"{cid}: 임베딩 {len(p)}장 · zero-shot 점수 {len(zs)}장 — 같은 프레임이 아니다")
         zs[:, CATS.index("blood")] = p
         save_npz(out / f"{cid}.npz", p=zs, cats=np.array(CATS))
 
@@ -182,6 +207,22 @@ def cmd_selftest(_a=None) -> None:
     amb = dict(clip_id="x", category="blood", onset="4", offset="7", ambiguous="true")
     for order in ([sure, amb], [amb, sure]):
         assert frame_labels(9, order, "x").tolist() == [0, 0, 1, 1, -1, -1, -1, -1, 0]
+    # 제외 목록 읽기 — 잘 읽거나, 아니면 멈춘다. 조용히 엉뚱한 집합을 돌려주지 않는다
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    cases = {"ok.txt": ("c001 c002\n", {"c001", "c002"}),
+             "labels.csv": ("video_id,clip_id,onset\nv9,c001,1\n", {"c001"}),
+             "bom.csv": ("\ufeffclip_id,x\nc001,a\n", {"c001"}),
+             "noid.csv": ("video_id,onset\nv9,1\n", None),
+             "comma.txt": ("c001\nc002,c003\n", None),
+             "empty.txt": ("\n", None)}
+    for name, (txt, want) in cases.items():
+        (d / name).write_text(txt, encoding="utf-8")
+        try:
+            got = _read_ids(str(d / name))
+        except SystemExit:
+            got = None
+        assert got == want, (name, got)
     print("selftest ok")
 
 
