@@ -4,11 +4,17 @@
   "version": "0.1.0",
   "description": "유튜브 영상을 3초 늦게 재생하고, 그 사이 트리거 장면을 찾아 도달 전에 가린다.",
   "permissions": [
-    "offscreen"
+    "offscreen",
+    "storage"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_title": "scareblock 설정",
+    "default_popup": "settings.html"
+  },
+  "options_page": "settings.html",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -23,6 +29,7 @@
         "src/pcm.js",
         "src/visual.js",
         "src/ringbuffer.js",
+        "src/settings.js",
         "src/player.js",
         "src/detector-fake.js",
         "src/speech-gate.js",

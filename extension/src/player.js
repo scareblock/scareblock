@@ -54,6 +54,10 @@ SB.Player = class {
     this._measureEnd = null;    // 계측을 끈 시점 { frames, at } — 켜져 있으면 null
     // 간격은 직전 프레임이 한 일의 비용이다. 직전 프레임의 블러 여부로 분류한다(#42 리뷰 🟡2).
     this._prevHit = null;       // null = 직전 프레임이 없거나 버퍼 채우는 중
+
+    // 사용자 설정(settings.js) — 기본은 지금까지의 동작
+    this.mode = 'blur';         // 'blur' | 'warn' — 경고만: 가리지 않고 미리 알려 준다
+    this.disabledCats = new Set();   // 끈 트리거 종류. 'manual'(blurNow)은 끌 수 없다
   }
 
   /**
@@ -98,7 +102,23 @@ SB.Player = class {
     for (let i = this._cursor; i < list.length; i++) {
       const t = list[i];
       if (t.time > mediaTime) break;   // 오름차순이라 뒤는 볼 필요가 없다
+      if (this.disabledCats.has(t.category)) continue;   // 끈 종류는 건너뛴다 — 커서는 그대로 둔다
       if (mediaTime <= t.time + t.duration) return t;
+    }
+    return null;
+  }
+
+  /**
+   * 경고만 모드: `lead`초 안에 화면에 닿을 트리거. **커서를 건드리지 않는다** — triggerAt()에 미래 시각을 넘기면
+   * 커서가 지금 걸려 있는 트리거를 지나쳐 블러가 빠질 수 있다.
+   */
+  upcoming(mediaTime, lead) {
+    const list = this.triggers;
+    for (let i = this._cursor; i < list.length; i++) {
+      const t = list[i];
+      if (t.time > mediaTime + lead) break;
+      if (this.disabledCats.has(t.category)) continue;
+      if (t.time > mediaTime) return t;
     }
     return null;
   }
@@ -335,25 +355,32 @@ SB.Player = class {
     const slot = this.ring.findAtOrBefore(this.video.currentTime - cfg.DELAY_SEC);
     if (slot) {
       const hit = this.triggerAt(slot.t);
+      const warn = this.mode === 'warn' && hit?.category !== 'manual';
+      const blur = hit && !warn;
       const drawAt = this._measuring ? performance.now() : 0;
-      octx.filter = hit ? `blur(${cfg.BLUR_PX}px)` : 'none';
+      octx.filter = blur ? `blur(${cfg.BLUR_PX}px)` : 'none';
       octx.drawImage(slot.canvas, 0, 0, cfg.BUF_W, cfg.BUF_H);
       octx.filter = 'none';
       if (this._measuring) {
-        (hit ? this._tBlurDraw : this._tPlainDraw).push(performance.now() - drawAt);
+        (blur ? this._tBlurDraw : this._tPlainDraw).push(performance.now() - drawAt);   // 블러를 실제로 그렸는가
         // gap은 직전 프레임 → 지금이라 직전 프레임의 비용이다. 이번 hit으로 나누면
         // 버스트 경계마다 한 프레임씩 반대 칸에 들어간다.
         if (gap > 0 && this._prevHit !== null) {
           (this._prevHit ? this._tBlurGap : this._tPlainGap).push(gap);
         }
-        this._prevHit = !!hit;
+        this._prevHit = !!blur;
       }
-      const want = hit ? cfg.FADE_DB : 1;            // 음량 페이드다운
+      const want = blur ? cfg.FADE_DB : 1;           // 음량 페이드다운 — 경고만 모드에서는 줄이지 않는다
       if (want !== this._gainNow) {
         this._gainNow = want;
         this._rampGain(want);
       }
-      if (hit) this._drawBadge(hit);
+      if (blur) this._drawBadge(`${this._label(hit)} 가림`);
+      else if (this.mode === 'warn') {
+        // 지연 버퍼 덕에 화면보다 먼저 안다 — 닿기 전에 알려 주는 것이 경고만 모드의 뜻이다
+        const soon = hit || this.upcoming(slot.t, cfg.WARN_LEAD_S);
+        if (soon) this._drawBadge(hit ? `⚠ ${this._label(soon)}` : `⚠ 곧 ${this._label(soon)}`, true);
+      }
     } else {
       this._prevHit = null;
       octx.fillStyle = '#000';
@@ -383,14 +410,18 @@ SB.Player = class {
     g.linearRampToValueAtTime(want, now + 0.08);
   }
 
-  _drawBadge(hit) {
+  _label(t) { return SB.CATEGORY_LABEL?.[t.category] ?? t.category; }
+
+  /** 가운데(가림) 또는 위쪽(경고만 — 화면을 덜 가린다)에 띠를 그린다 */
+  _drawBadge(text, top = false) {
     const { octx, cfg } = this;
-    octx.fillStyle = 'rgba(0,0,0,.72)';
-    octx.fillRect(cfg.BUF_W / 2 - 150, cfg.BUF_H / 2 - 26, 300, 52);
+    const y = top ? 40 : cfg.BUF_H / 2 - 26;
+    octx.fillStyle = top ? 'rgba(160,20,20,.85)' : 'rgba(0,0,0,.72)';
+    octx.fillRect(cfg.BUF_W / 2 - 170, y, 340, 52);
     octx.fillStyle = '#fff';
     octx.font = '22px system-ui, sans-serif';
     octx.textAlign = 'center';
-    octx.fillText(`${hit.category} 가림`, cfg.BUF_W / 2, cfg.BUF_H / 2 + 8);
+    octx.fillText(text, cfg.BUF_W / 2, y + 34);
     octx.textAlign = 'left';
   }
 
