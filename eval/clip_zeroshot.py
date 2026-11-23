@@ -285,10 +285,9 @@ def summarize(stats: list[dict]) -> dict:
     tp = sum(s["tp"] for s in stats); fp = sum(s["fp"] for s in stats); fn = sum(s["fn"] for s in stats)
     prec = tp / (tp + fp) if tp + fp else float("nan")
     rec = tp / (tp + fn) if tp + fn else float("nan")
-    if np.isnan(prec) or np.isnan(rec):
-        f1 = float("nan")
-    else:
-        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0   # tp = 0이면 관례대로 0
+    # 정답 프레임이 있으면 F1은 늘 정의된다 — 하나도 안 가렸어도(tp + fp = 0) 0이다 (#51 재리뷰 1).
+    # 2·P·R/(P+R)와 같은 값이고, precision이 NaN인 경우까지 한 번에 처리한다
+    f1 = 2 * tp / (2 * tp + fp + fn) if tp + fn else float("nan")
     cov = sum(s["cov"] for s in stats); tot = sum(s["tot"] for s in stats)
     nn = sum(s["neg_n"] for s in stats)
     return dict(
@@ -326,7 +325,8 @@ def cmd_evaluate(a) -> None:
     for x, y, nx, ny in ((dev, test, "neutral-dev", "neutral-test"), (dev, lab, "neutral-dev", "라벨 클립"),
                          (test, lab, "neutral-test", "라벨 클립")):
         both = sorted(set(x) & set(y))
-        assert not both, f"{nx}와 {ny}가 겹친다: {both}"
+        if both:   # assert가 아니다 — `python -O`에서도 꺼지면 안 된다 (#51 재리뷰 2)
+            raise SystemExit(f"{nx}와 {ny}가 겹친다: {both}")
 
     cache: dict[str, np.ndarray] = {}
     def scores(cid: str) -> np.ndarray:
@@ -432,6 +432,11 @@ def cmd_selftest(_a=None) -> None:
     # tp = 0이면 F1은 NaN이 아니라 0
     z = per_clip(np.array([0.9, 0.0, 0.0]), 0.5, [(1.0, 2.0)], [])
     assert summarize([z])["frame_f1"] == 0.0
+    # 하나도 안 가렸어도(tp + fp = 0) 정답이 있으면 0 — precision만 정의되지 않는다
+    z0 = summarize([per_clip(np.zeros(3), 0.5, [(1.0, 2.0)], [])])
+    assert z0["frame_f1"] == 0.0 and np.isnan(z0["frame_precision"])
+    # 정답 프레임이 없으면 F1은 정의되지 않는다
+    assert np.isnan(summarize([per_clip(np.ones(3), 0.5, [], [])])["frame_f1"])
     # 리사이즈 크기 — torchvision Resize(224)와 같다(버림). 16:9가 아닌 것에서 반올림과 갈린다
     for (w, h), want in {(1280, 720): (398, 224), (854, 480): (398, 224), (640, 480): (298, 224),
                          (480, 360): (298, 224), (1280, 536): (534, 224), (360, 640): (224, 398),
