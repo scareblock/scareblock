@@ -194,6 +194,7 @@ python3 -m eval.e1 --selftest
 | `evaluate.py` | 같은 클립 안 onset ±0.5초 매칭(§6), P/R/F1 + 적시성 + 잡은 것 중 제때 + 탐지 지연 분포 요약 |
 | `e1.py` | lookahead 스윕, 표 출력, 발화율 스윕(`--rate-sweep`), 자체 점검 |
 | `yamnet.py` | 사전학습 YAMNet 클래스 점수 → 탐지 (11.05 조건부 열, 학습 없음). 모델 만들기는 [yamnet-setup](../docs/yamnet-setup.md) |
+| `e3.py` | E3 — 종류별 유지 시간 T와 필요 lookahead. 규칙(E1) · CLIP 점수로 노출 비율을 L별로 ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7079604506)) |
 | `iaa.py` | 주석자 간 일치도 — 사건 매칭 κ · 100 ms 구간 κ · PSA를 한 번에 ([labeling-guide §6](../docs/labeling-guide.md#6-주석자-간-일치도)) |
 
 **홉은 10 ms다.** PoC의 50 ms로는 놀람 반사 문헌이 말하는 2~100 ms 상승 시간을

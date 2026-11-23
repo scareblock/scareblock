@@ -120,7 +120,7 @@ audio-tap ─16 kHz 패치─▶ infer-client ─window 메시지─▶ bridge �
 
 - **패치는 미디어 시각으로 자른다.** 오디오 탭은 규칙 탐지기와 같은 자리(지연 전 소스)에 물리고, 같은 원점 규칙
   (첫 콜백 `currentTime` + 표본 수, 시크 · 배속 · 버퍼링 복귀에서 리셋)을 쓴다. 리샘플러는 필터 지연을 싣지 않아
-  출력 표본 k가 정확히 입력 시각 k/16000초다 — 탐지 onset부터 0.975초를 자르면 eval의 `speech_gate.gate()`와 같은 구간이다
+  출력 표본 k가 정확히 입력 시각 k/16000초다 — 탐지 onset부터 0.975초를 자르면 eval의 `speech_gate.gate()`(#40 브랜치 `adb83cf`)와 같은 구간이다
 - **배속이면** 패치는 들리는 소리 0.975초다(미디어로는 0.975 × 배속초)
 - **실패는 null이다.** 모델이 없거나, offscreen이 안 뜨거나, 패치가 고리에서 밀려났거나, 기다리는 사이 시크했으면 null.
   부르는 쪽은 null을 「검증 못 함 → 기각하지 않는다」로 처리한다(#40 클립 끝 처리와 같은 이유)
@@ -144,7 +144,8 @@ bash extension/fetch-deps.sh   # vendor/ ← onnxruntime-web 1.20.1 (npm) · mod
 
 ```bash
 node extension/test/pcm.test.js     # 13/13 — 리샘플이 시각을 밀지 않음 · 8 kHz 위를 접지 않음 · 고리 구간
-node extension/test/infer.test.js   # 13/13 — 가짜 chrome · ort로 페이지 → offscreen 왕복(YAMNet · CLIP), 실패 시 null
+node extension/test/infer.test.js   # 14/14 — 가짜 chrome · ort로 페이지 → offscreen 왕복(YAMNet · CLIP), 중계는 떨어진 vm, 실패 시 null
+node extension/test/speech-gate.test.js   # 10/10 — 말소리 기각: 조건 둘 다 · 20개 클래스 = eval/yamnet.py · 판정 못 하면 그대로 가림
 ```
 
 **아직 실제 Chrome에서 확인하지 않았다.** 위 테스트는 메시지 모양과 시각 계산까지만 본다. 실기에서 볼 것:
