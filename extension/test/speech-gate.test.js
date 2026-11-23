@@ -2,7 +2,7 @@
  * 말소리 기각 검증. 브라우저 없이 돈다.
  *   node extension/test/speech-gate.test.js
  *
- * 규칙은 `eval/speech_gate.py` gate()와 같아야 한다: Speech ≥ θ **이고** Speech > 20개 클래스 최댓값일 때만 버린다.
+ * 규칙은 `eval/speech_gate.py`(#40 브랜치 `adb83cf` — main에는 아직 없다) gate()와 같아야 한다: Speech ≥ θ **이고** Speech > 20개 클래스 최댓값일 때만 버린다.
  * 판정을 못 하면(YAMNet 없음 · 패치 없음 · 시간 초과) **버리지 않고 낸다.**
  */
 const fs = require('fs');

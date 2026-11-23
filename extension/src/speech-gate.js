@@ -1,5 +1,5 @@
 /**
- * 말소리 기각 — 사후 검증 (#40 · #35 10.03 사전 등록). `eval/speech_gate.py`의 gate()를 옮긴 것이다.
+ * 말소리 기각 — 사후 검증 (#40 · #35 10.03 사전 등록). `eval/speech_gate.py`(#40 브랜치 `adb83cf` — main에는 아직 없다)의 gate()를 옮긴 것이다.
  *
  * 규칙 탐지가 울리면 사건 시작(onset)부터 YAMNet 패치 하나(0.975초)를 보고,
  *   `Speech ≥ θ(0.1)` **이고** `Speech > #43 등록 20개 클래스의 최댓값` 이면 그 탐지를 버린다.
@@ -31,7 +31,8 @@ SB.SpeechGate = class {
   /**
    * @param {() => any} getYamnet  지금의 SB.yamnet(없으면 null). 영상이 바뀌면 달라지므로 매번 묻는다
    * @param {(t: object) => void} emit  통과한 트리거를 넘길 곳 (재생기의 addTriggers)
-   * @param {() => number} msUntilShown  트리거가 화면에 닿기까지 남은 시간(ms)
+   * @param {number} [theta]  Speech 기준값 (기본 SB.SPEECH_THETA = 0.1, #35 10.03 등록)
+   * @param {number} [marginMs]  남은 시간에서 미리 빼 두는 여유(ms). 남은 시간은 submit(trig, msLeft)로 받는다
    */
   constructor(getYamnet, emit, theta = SB.SPEECH_THETA, marginMs = 250) {
     this.getYamnet = getYamnet;

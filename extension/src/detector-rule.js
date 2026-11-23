@@ -231,8 +231,9 @@ SB.RuleDetector = class {
     if (this.gate) {
       // 말소리 기각: 판정이 끝나야 재생기에 넘긴다. onset 프레임은 currentTime이 onset + 지연에 닿을 때 화면에 나온다
       const msLeft = ((onset + SB.config.DELAY_SEC) - this.video.currentTime) / rate * 1000;
+      const n = this.n;   // 판정을 기다리는 사이 다음 탐지가 오면 this.n이 바뀐다
       this.gate.submit(trig, msLeft).then((r) => {
-        if (r === 'reject') SB.log(`  └ #${this.n} 말소리로 판정 — 가리지 않는다`);
+        if (r === 'reject') SB.log(`  └ #${n} 말소리로 판정 — 가리지 않는다`);
       });
     } else {
       this.player.addTriggers([trig]);
