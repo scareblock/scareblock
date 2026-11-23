@@ -8,6 +8,7 @@
  *   e5.prepare('c019')            // 시작점에 맞춰 멈춰 두고 검은 화면에 「준비됨」을 띄운다
  *   (참가자가 앉으면) Space         // 검은 화면이 걷히고 재생. 300초가 「보이면」 멈추고 「끝」
  *   e5.report()                   // 이번 세션 기록 — 실제 시작 · 끝 시각, 중간에 끼어든 일시정지 · 시크
+ *   Esc                           // 진행 중 참가자가 그만두고 싶을 때 — 기록은 남고 그 세션은 무효
  *   e5.abort()                    // 진행 취소, 화면 원래대로
  *
  * 필터 조건에서 「안전 버퍼 채우는 중…」을 참가자가 보지 않게, 시작점보다 1초 앞에서 미리 틀어 (지연 + 1)초 동안
@@ -67,46 +68,48 @@
         // 버퍼를 채운다: 화면에 시작 프레임이 보이는 순간 멈춘다
         const onSeeked = () => {
           v.removeEventListener('seeked', onSeeked);
-          this._watch((t) => this.shown(t) >= this.clip.start, () => this._primed());
+          this._watch((t) => this.shown(t) >= this.clip.start, (t) => this._primed(t));
           v.play();
         };
         v.addEventListener('seeked', onSeeked);
       } else {
-        const onSeeked = () => { v.removeEventListener('seeked', onSeeked); this._primed(); };
+        const onSeeked = () => { v.removeEventListener('seeked', onSeeked); this._primed(v.currentTime); };
         v.addEventListener('seeked', onSeeked);
       }
       return `${this.condition} 조건 · ${this.clip.id} ${this.clip.start}s부터 ${this.clip.dur}s — 준비 중`;
     }
 
-    _primed() {
+    _primed(t) {
       this.video.pause();
       this.state = 'ready';
-      this._note('ready', { 보이는시각: +this.shown(this.video.currentTime).toFixed(3) });
+      this.tReady = t;
+      this._note('ready', { 보이는시각: +this.shown(t).toFixed(3) });
       this._overlay('준비됨 — Space 키로 시작');
       this._keys(true);
-      this.log(`[e5] 준비됨 — 보이는 시각 ${this.shown(this.video.currentTime).toFixed(2)}s. 참가자가 준비되면 Space`);
+      this.log(`[e5] 준비됨 — 보이는 시각 ${this.shown(t).toFixed(2)}s. 참가자가 준비되면 Space`);
     }
 
     start() {
       if (this.state !== 'ready') return `지금은 ${this.state} — prepare 뒤 준비됨에서만 시작한다`;
       this.state = 'running';
-      this._keys(false);
-      this._overlay(null);
+      this._overlay('', { clear: true });   // 화면은 비우되 클릭은 계속 막는다 — 영상 클릭이 재생 · 정지를 바꾼다
       this._guard(true);
       this.t0 = this.now();
-      this._note('start', { 보이는시각: +this.shown(this.video.currentTime).toFixed(3) });
+      this._note('start', { 보이는시각: +this.shown(this.tReady ?? this.video.currentTime).toFixed(3) });
       const end = this.clip.start + this.clip.dur;
-      this._watch((t) => this.shown(t) >= end, () => this._end());
+      this._watch((t) => this.shown(t) >= end, (t) => this._end(t));
       this.video.play();
       return 'started';
     }
 
-    _end() {
+    _end(t) {
       this._guard(false);          // 내가 멈추는 것은 끼어든 일이 아니다 — 감시를 먼저 끈다
       this.state = 'done';
+      this._keys(false);
       this.video.pause();
       const wall = (this.now() - this.t0) / 1000;
-      this._note('end', { 보이는시각: +this.shown(this.video.currentTime).toFixed(3), 걸린초: +wall.toFixed(2) });
+      // 멈춘 뒤 currentTime이 아니라 판정한 프레임의 시각을 남긴다 — 둘이 수 ms 다르다
+      this._note('end', { 보이는시각: +this.shown(t).toFixed(3), 걸린초: +wall.toFixed(2) });
       this._overlay('끝');
       this.log(`[e5] 끝 — ${this.clip.id} ${this.condition}, ${wall.toFixed(1)}초. e5.report()로 기록 확인`);
     }
@@ -148,7 +151,7 @@
       this._watchId = id;
       const tick = (_now, meta) => {
         if (this._watchId !== id) return;
-        if (cond(meta.mediaTime)) { this._watchId = null; fire(); return; }
+        if (cond(meta.mediaTime)) { this._watchId = null; fire(meta.mediaTime); return; }
         this.video.requestVideoFrameCallback(tick);
       };
       this.video.requestVideoFrameCallback(tick);
@@ -174,36 +177,66 @@
       }
     }
 
-    /** 준비됨 상태에서 Space만 받는다. 유튜브의 단축키(Space · k · 화살표)가 먼저 먹지 않게 가로챈다 */
+    /**
+     * 준비됨 · 진행 중에는 유튜브 단축키가 영상을 건드리지 못하게 가로챈다.
+     * **keydown만 막으면 안 된다** — 유튜브는 Space를 keyup에서도 받아, 시작한 직후 다시 멈췄다(11.23 실기).
+     *   준비됨: Space → 시작
+     *   진행 중: Esc → 참가자 중단(동의서: 언제든 멈출 수 있다). 나머지 재생 단축키는 무시
+     *   f(전체 화면)는 막지 않는다
+     */
     _keys(on) {
+      const BLOCK = new Set([' ', 'k', 'K', 'j', 'J', 'l', 'L', 'm', 'M', ',', '.', '<', '>', 'Home', 'End',
+        'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
       if (on && !this._onKey) {
         this._onKey = (e) => {
-          if (this.state !== 'ready') return;
-          if (e.code === 'Space' || e.key === ' ') {
-            e.preventDefault();
-            e.stopImmediatePropagation();
+          if (this.state !== 'ready' && this.state !== 'running') return;
+          const space = e.code === 'Space' || e.key === ' ';
+          if (e.type === 'keydown' && space && this.state === 'ready') {
+            e.preventDefault(); e.stopImmediatePropagation();
             this.start();
-          } else if (['k', 'j', 'l', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
+            return;
           }
+          if (e.type === 'keydown' && e.key === 'Escape' && this.state === 'running') {
+            e.preventDefault(); e.stopImmediatePropagation();
+            this.stopByParticipant();
+            return;
+          }
+          if (space || BLOCK.has(e.key)) { e.preventDefault(); e.stopImmediatePropagation(); }
         };
-        this.win.addEventListener('keydown', this._onKey, true);
+        for (const t of ['keydown', 'keyup', 'keypress']) this.win.addEventListener(t, this._onKey, true);
       } else if (!on && this._onKey) {
-        this.win.removeEventListener('keydown', this._onKey, true);
+        for (const t of ['keydown', 'keyup', 'keypress']) this.win.removeEventListener(t, this._onKey, true);
         this._onKey = null;
       }
     }
 
+    /** 참가자가 그만두고 싶다고 할 때 — Esc. 기록은 남기고 그 세션은 유효하지 않다 */
+    stopByParticipant() {
+      if (this.state !== 'running') return;
+      this._note('interrupt', { what: '참가자 중단(Esc)', 보이는시각: +this.shown(this.video.currentTime).toFixed(2) });
+      this._stopWatch();
+      this._guard(false);
+      this.state = 'stopped';
+      this.video.pause();
+      this._overlay('중단했습니다');
+      this.log('[e5] 참가자 중단 — 이 세션은 분석에서 빠진다(#35 E5 「중간에 멈춘 사람」)');
+    }
+
     /** 플레이어 안에 덮는다 — 유튜브 전체 화면(f)에서도 보이도록 #movie_player 안에 둔다 */
-    _overlay(text) {
+    _overlay(text, { clear = false } = {}) {
       if (!this._ov) {
         const d = this.doc.createElement('div');
-        d.style.cssText = 'position:absolute;inset:0;z-index:10000;background:#000;color:#fff;' +
+        d.style.cssText = 'position:absolute;inset:0;z-index:10000;color:#fff;' +
           'display:flex;align-items:center;justify-content:center;font:28px system-ui,sans-serif;cursor:none';
+        // 플레이어를 클릭하면 유튜브가 재생 · 정지를 바꾼다 — 덮개가 받아서 버린다
+        const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+        for (const t of ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'contextmenu']) {
+          d.addEventListener(t, swallow);
+        }
         this._ov = d;
       }
       if (text == null) { this._ov.remove?.(); return; }
+      this._ov.style.background = clear ? 'transparent' : '#000';
       this._ov.textContent = text;
       if (!this._ov.parentNode) this.host.appendChild(this._ov);
     }
@@ -247,6 +280,7 @@
       start: () => s.start(),
       report: () => s.report(),
       abort: () => s.abort(),
+      stop: () => s.stopByParticipant(),
       session: s,
     };
     console.log(`[e5] ${s.condition} 조건 (${filtered ? '확장 있음 — 화면 3초 지연' : '확장 없음'}). ` +
