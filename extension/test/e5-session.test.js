@@ -181,9 +181,23 @@ ok('준비 전 Space · 준비 중 유튜브 단축키는 막지 않는다 / 준
   assert.strictEqual(s.state, 'ready');
 });
 
-ok('시작점이 비어 있으면 무엇을 채워야 하는지 알려준다', () => {
+ok('c019 · c004 시작점이 채워져 있고, 다른 영상 페이지에서는 거부한다', () => {
+  assert.deepStrictEqual(globalThis.E5_CLIPS.c019, { video: 'cBPevvxqmGk', start: 1164.34 });
+  assert.deepStrictEqual(globalThis.E5_CLIPS.c004, { video: 'fmwJ4b-h8Bg', start: 8948.5 });
+  const v = fakeVideo(0), dom = fakeDom(), s = session(0, v, dom);   // 이 가짜 페이지의 영상은 'abc'
+  assert.throws(() => s.prepare('c019'), /cBPevvxqmGk/);
+  assert.throws(() => s.prepare('c999'), /clips-e1\.csv/);
+});
+
+ok('끝나면 진행 막대를 돌려준다(「끝」 화면은 남는다)', async () => {
   const v = fakeVideo(0), dom = fakeDom(), s = session(0, v, dom);
-  assert.throws(() => s.prepare('c019'), /clips-e1\.csv/);
+  s.prepare({ start: 50, dur: 5 });
+  await tick();
+  assert.strictEqual(dom.doc.head.children.length, 1);
+  dom.press(' ');
+  v.run(6);
+  assert.strictEqual(dom.doc.head.children.length, 0);
+  assert.strictEqual(dom.overlayText(), '끝');
 });
 
 ok('다른 영상 페이지면 시작하지 않는다', () => {
