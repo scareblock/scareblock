@@ -38,7 +38,6 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "src/pcm.js",
         "src/bridge.js"
       ],
       "world": "ISOLATED",

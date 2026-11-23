@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const v8 = require('v8');
+const vm = require('vm');
 
 const src = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 
@@ -81,7 +82,23 @@ global.ort = {
 };
 global.fetch = async () => ({ text: async () => 'index,mid,display_name\n0,/m/09x0r,Speech\n1,/m/x,"Child speech, kid speaking"\n' });
 
-for (const f of ['src/pcm.js', 'src/infer-client.js', 'src/audio-tap.js', 'src/bridge.js', 'background.js']) eval(src(f));
+for (const f of ['src/pcm.js', 'src/infer-client.js', 'src/audio-tap.js', 'background.js']) eval(src(f));
+
+// 중계는 **따로 떨어진 전역**에서 돌린다 — 실제 ISOLATED world처럼 페이지 쪽 SB가 보이지 않는다.
+// 같은 전역에서 돌리면 중계가 페이지의 SB에 기대도 테스트가 통과한다(11.23 실기에서 그렇게 놓쳤다).
+const bridgeCtx = vm.createContext({
+  window: null, location, chrome, btoa, console, setTimeout,
+  Float32Array, Uint8Array, Number, Set, String, Error, Promise,   // 메시지로 건너온 배열과 같은 realm
+  addEventListener: (...a) => global.addEventListener(...a),
+  postMessage: (...a) => global.postMessage(...a),
+});
+const bridgeGlobal = vm.runInContext('globalThis', bridgeCtx);   // 컨텍스트 안에서 보이는 전역(프록시)
+bridgeCtx.window = bridgeGlobal;
+// 가짜 window 메시지의 source는 페이지 전역이다 — 중계의 `e.source !== window` 검사가 통과하도록 같은 것으로 본다
+const bridgeSeen = (fn) => (e) => fn(e.source === global ? { ...e, source: bridgeGlobal } : e);
+const keepAdd = global.addEventListener;
+bridgeCtx.addEventListener = (t, fn) => keepAdd(t, bridgeSeen(fn));
+vm.runInContext(src('src/bridge.js'), bridgeCtx);
 SB.log = () => {};
 
 let pass = 0, total = 0;
@@ -91,7 +108,7 @@ const ok = (name, fn) => tests.push([name, fn]);
 ok('status — 서비스 워커가 offscreen을 띄우고 모델을 올린다', async () => {
   const c = new SB.InferClient();
   const st = await c.status();
-  assert.ok(st?.ready, JSON.stringify(st));
+  assert.ok(st?.ready, JSON.stringify(st) + ' ' + c.report().마지막오류);
   assert.strictEqual(created.length, 1);
   assert.strictEqual(st.names[1], 'Child speech, kid speaking');
   assert.strictEqual(ort.env.wasm.numThreads, 1);
@@ -136,6 +153,10 @@ ok('중계가 없으면 시간 초과로 null', async () => {
   assert.strictEqual(await c.yamnet(new Float32Array(SB.YAMNET_WIN_N)), null);
   assert.strictEqual(c.report().시간초과, 2);
   c.dispose();
+});
+
+ok('중계는 페이지 쪽 SB 없이 돈다', () => {
+  assert.strictEqual(vm.runInContext('typeof SB', bridgeCtx), 'undefined');
 });
 
 ok('중계는 모르는 op · 다른 출처 메시지를 무시한다', async () => {
