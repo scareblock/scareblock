@@ -26,7 +26,10 @@ from pathlib import Path
 import numpy as np
 
 LOOKAHEADS = [0.0, 0.5, 1.0, 2.0, 3.0, 5.0]
-RENDER_S = 0.02                     # E1 보고값과 같다
+# E1 보고값(`e1 --render-s 0.02`, #35 B-rerun-main)과 같다. `evaluate.RENDER_S`(0.0, 미측정)와는 다르다 —
+# M1 실측으로 E1을 다시 내면 `--render-s`도 같은 값으로 넘긴다 (#55 리뷰 3)
+RENDER_S = 0.02
+ANNOTATOR = "B"                     # E1 · 04단계 보고 주석자
 SURGE_OF_QUIET = 20.0               # E1 보고 동작점
 CATS = ("blood", "syringe", "spider")   # clip-scores npz 열 순서
 THETA = {"blood": 0.2490658164024353,   # neutral-dev 5% (#35 04단계)
@@ -44,6 +47,11 @@ class Event:
     offset: float
     d: float | None                 # None = 못 잡음
 
+    def __post_init__(self):
+        # T로 나누므로 길이 0 · 음수 라벨은 받지 않는다 (#55 리뷰 2)
+        if not self.offset > self.onset:
+            raise ValueError(f"{self.clip_id} {self.cat} {self.onset}–{self.offset}: offset이 onset보다 앞서거나 같다")
+
     @property
     def T(self) -> float:
         return self.offset - self.onset
@@ -58,13 +66,13 @@ class Event:
 # ── 점프 스케어: 규칙 탐지기 ─────────────────────────────────────────
 
 def jump_events(labels_csv: str, audio_dir: str, clips_csv: str,
-                render_s: float = RENDER_S) -> list[Event]:
+                render_s: float = RENDER_S, annotator: str = ANNOTATOR) -> list[Event]:
     from . import labels as L
     from .detect import Params, run
     from .evaluate import match
     from .features import extract, load_wav
 
-    truth = L.pick_annotator(L.load(labels_csv), "B")       # E1 보고 주석자
+    truth = L.pick_annotator(L.load(labels_csv), annotator)   # E1 보고 주석자
     ids = L.load_clips(clips_csv)
     audio = {p.stem: p for p in Path(audio_dir).glob("*.wav")}
     used = [c for c in ids if c in audio]
@@ -91,22 +99,29 @@ def clip_latency(p: np.ndarray, theta: float, on: float, off: float,
     return float(ks[0] - on + render_s) if len(ks) else None
 
 
-def vis_events(label_csvs: list[str], scores_dir: str, render_s: float = RENDER_S) -> list[Event]:
-    out, seen = [], set()
+def vis_events(label_csvs: list[str], scores_dir: str, render_s: float = RENDER_S,
+               annotator: str = ANNOTATOR) -> list[Event]:
+    """시각 사건. `labels.load`로 읽고(ambiguous 파싱 · strip · 기본값이 E1과 같다) 주석자 하나만 쓴다 (#55 리뷰 1 · 4).
+
+    두 사람이 같은 사건을 조금 다른 시각으로 찍은 이중 라벨을 같이 넘겨도 두 건으로 세지 않는다.
+    """
+    from . import labels as L
+    out, seen, cache = [], set(), {}
     for f in label_csvs:
-        for r in csv.DictReader(open(f, encoding="utf-8")):
-            cat = r["category"]
-            if cat not in THETA or r["ambiguous"].strip().lower() == "true":
+        for x in L.pick_annotator(L.load(f), annotator):
+            if x.category not in THETA or x.ambiguous:
                 continue
-            key = (r["clip_id"], cat, r["onset"], r["offset"])
+            key = (x.clip_id, x.category, x.onset, x.offset)
             if key in seen:             # E1+V2 합본 파일이 겹쳐 들어와도 한 번만
                 continue
             seen.add(key)
-            z = np.load(Path(scores_dir) / f"{r['clip_id']}.npz")
-            assert tuple(z["cats"]) == CATS
-            p = z["p"][:, CATS.index(cat)]
-            on, off = float(r["onset"]), float(r["offset"])
-            out.append(Event(cat, r["clip_id"], on, off, clip_latency(p, THETA[cat], on, off, render_s)))
+            if x.clip_id not in cache:
+                z = np.load(Path(scores_dir) / f"{x.clip_id}.npz")
+                assert tuple(z["cats"]) == CATS
+                cache[x.clip_id] = z["p"]
+            p = cache[x.clip_id][:, CATS.index(x.category)]
+            out.append(Event(x.category, x.clip_id, x.onset, x.offset,
+                             clip_latency(p, THETA[x.category], x.onset, x.offset, render_s)))
     return out
 
 
@@ -155,6 +170,8 @@ def summarize(events: list[Event]) -> dict:
             "T": _q([e.T for e in ev]),
             "T_over_3s": float(np.mean([e.T > 3.0 for e in ev])),
             "d_caught": _q([e.d for e in got]),
+            # 라벨 onset이 늦게 찍혀 확신이 먼저 온 사건 — exposure에서 0(완전히 가림)으로 잘린다 (#55 리뷰 5)
+            "d_negative_caught": int(sum(e.d < 0 for e in got)),
             "half_free_caught": _half_rate(got),
             "half_free_caught_ci95": _boot_half(got, np.random.default_rng(SEED)),
             "half_free_all": _half_rate(ev),
@@ -178,13 +195,13 @@ def summarize(events: list[Event]) -> dict:
 def render(res: dict) -> str:
     cats = [c for c in res if not c.startswith("_")]
     f = lambda v, k=3: "—" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.{k}f}"
-    lines = ["| 종류 | 사건 (잡음) | T 중앙값 | T > 3 s | d 중앙값 (잡음) | 버퍼 없이 절반 넘게 가림 (잡음) | 95% 구간 |",
-             "|---|---|---|---|---|---|---|"]
+    lines = ["| 종류 | 사건 (잡음) | T 중앙값 | T > 3 s | d 중앙값 (잡음) | d < 0 | 버퍼 없이 절반 넘게 가림 (잡음) | 95% 구간 |",
+             "|---|---|---|---|---|---|---|---|"]
     for c in cats:
         r = res[c]
         ci = r["half_free_caught_ci95"]
         lines.append(f"| {c} | {r['n']} ({r['caught']}) | {f(r['T']['median'], 2)} s | {f(r['T_over_3s'], 2)} "
-                     f"| {f(r['d_caught']['median'] if r['d_caught'] else None, 3)} s "
+                     f"| {f(r['d_caught']['median'] if r['d_caught'] else None, 3)} s | {r['d_negative_caught']} "
                      f"| {f(r['half_free_caught'], 2)} | {'—' if ci is None else f'{ci[0]:.2f}–{ci[1]:.2f}'} |")
     lines += ["", "**L별 — 잡은 사건의 노출 비율 중앙값 / 노출 0 비율**", "",
               "| 종류 | " + " | ".join(f"L={L:g}" for L in LOOKAHEADS) + " |",
@@ -222,6 +239,24 @@ def _selftest() -> int:
     assert abs(s["a"]["half_free_all"] - 1 / 3) < 1e-12
     assert s["b"]["by_L"]["0"]["zero_caught"] == 0.0 and s["b"]["by_L"]["0.5"]["zero_caught"] == 1.0
     assert s["a"]["T_over_3s"] == 1 / 3
+    assert s["b"]["d_negative_caught"] == 0
+    assert summarize([Event("j", "c", 5, 6, -0.1)])["j"]["d_negative_caught"] == 1
+    for on, off in ((3.0, 3.0), (3.0, 2.0)):          # 길이 0 · 음수 라벨은 받지 않는다
+        try:
+            Event("x", "c", on, off, None)
+            raise AssertionError("받으면 안 된다")
+        except ValueError:
+            pass
+    # 시각 라벨: 주석자 하나만 · ambiguous는 labels._to_bool 규칙(yes · 1 등) · 합본 중복은 한 번
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    np.savez(d / "c1.npz", p=np.array([[0.0, 0, 0], [0.9, 0, 0], [0.9, 0, 0]]), cats=np.array(CATS))
+    head = "video_id,clip_id,onset,offset,category,ambiguous,annotator\n"
+    (d / "V.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\nv,c1,0.5,2.5,blood,yes,B\n"
+                             "v,c1,0.6,2.4,blood,false,A\n", encoding="utf-8")
+    (d / "V2.csv").write_text(head + "v,c1,0.5,2.5,blood,false,B\n", encoding="utf-8")
+    ev = vis_events([str(d / "V.csv"), str(d / "V2.csv")], str(d), render_s=0.0)
+    assert [(e.clip_id, e.onset, e.d) for e in ev] == [("c1", 0.5, 0.5)], ev
     render(s)
     print("e3 selftest ok")
     return 0
@@ -236,13 +271,18 @@ def main(argv=None) -> int:
     ap.add_argument("--scores")
     ap.add_argument("--out")
     ap.add_argument("--events-out", help="사건별 CSV (산점도용)")
+    ap.add_argument("--render-s", type=float, default=RENDER_S,
+                    help=f"렌더링 시간(초). E1을 낸 `e1 --render-s`와 같은 값 (기본 {RENDER_S})")
+    ap.add_argument("--annotator", default=ANNOTATOR, help=f"이 주석자의 라벨만 (기본 {ANNOTATOR})")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return _selftest()
     if not (a.jump_labels and a.audio and a.clips and a.vis_labels and a.scores):
         ap.error("--jump-labels --audio --clips --vis-labels --scores 가 모두 필요하다")
-    ev = jump_events(a.jump_labels, a.audio, a.clips) + vis_events(a.vis_labels, a.scores)
+    ev = (jump_events(a.jump_labels, a.audio, a.clips, a.render_s, a.annotator)
+          + vis_events(a.vis_labels, a.scores, a.render_s, a.annotator))
+    print(f"주석자 {a.annotator} · 렌더링 {a.render_s:.2f} s 포함", file=sys.stderr)
     res = summarize(ev)
     print(render(res))
     if a.out:
