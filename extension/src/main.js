@@ -6,8 +6,9 @@ window.SB = window.SB || {};
   let detector = null;
   let visual = null;
   let tap = null;
+  let clip = null;
   // 클라이언트는 페이지에 하나 — 영상이 바뀌어도 window 메시지 리스너를 다시 걸지 않는다
-  const infer = SB.config.YAMNET ? new SB.InferClient() : null;
+  const infer = (SB.config.YAMNET || SB.config.CLIP) ? new SB.InferClient() : null;
 
   /**
    * offscreen이 준비됐으면 오디오 탭을 붙이고 SB.yamnet을 연다. 아니면 아무것도 붙이지 않는다 —
@@ -29,6 +30,24 @@ window.SB = window.SB || {};
       console.error('[scareblock] 오디오 탭 시작 실패 — YAMNet 없이 돈다', e);
       tap = null;
       SB.yamnet = null;
+    }
+  }
+
+  /** offscreen에 CLIP이 올라왔으면 샘플러를 붙인다. 아니면 아무것도 안 붙인다 — 오디오 탐지는 그대로 */
+  async function attachClip(video, p) {
+    const st = await infer.clipStatus();
+    if (p !== player || !p?.running) return;
+    if (!st?.ready) {
+      SB.log(`CLIP 꺼짐 — ${st?.error || infer.stats.마지막오류 || '응답 없음'}`);
+      return;
+    }
+    try {
+      clip = new SB.ClipSampler(video, p, infer);
+      clip.start();
+      SB.log(`CLIP 준비 — 모델 로드 ${st.loadMs} ms · 피 ${st.probe === 'blood' ? '보강 모델' : 'zero-shot'}`);
+    } catch (e) {
+      console.error('[scareblock] CLIP 시작 실패 — 없이 돈다', e);
+      clip = null;
     }
   }
 
@@ -87,19 +106,22 @@ window.SB = window.SB || {};
       // 별도 문서 추론 상태 — 왕복 시간 · 실패 수 · 탭 구간
       // 말소리 기각 — 받음 · 통과 · 기각 · 판정 없이 통과한 수와 최근 판정
       speech: () => detector.gate?.report() ?? { 안내: '말소리 기각이 꺼져 있다(config.SPEECH_GATE)' },
-      infer: () => ({ 클라이언트: infer?.report() ?? '꺼짐(config.YAMNET)', 탭: tap?.report() ?? '안 붙음' }),
+      infer: () => ({ 클라이언트: infer?.report() ?? '꺼짐(config.YAMNET · CLIP)', 탭: tap?.report() ?? '안 붙음' }),
+      // CLIP — 프레임 수 · 건너뜀 · 왕복 시간 · 최근 점수
+      clip: () => clip?.report() ?? { 안내: 'CLIP이 안 붙었다 — 콘솔의 「CLIP 꺼짐」 줄을 본다' },
       // 확인용: 미디어 시각 t(기본 지금보다 1.5초 전)부터 패치 하나의 상위 5개 클래스와 Speech
       yamnet: (t) => yamnetTop(t ?? video.currentTime - 1.5),
       // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
       setSurge: (n) => detector.setSurge?.(n),
-      stop: () => { stopYamnet(); visual?.stop(); detector.stop(); player.stop(); player = null; },
+      stop: () => { stopYamnet(); clip?.stop(); clip = null; visual?.stop(); detector.stop(); player.stop(); player = null; },
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',
         confidence: 1, duration: dur, source: 'manual',
       }]),
       player: () => player,
     };
-    if (infer) attachYamnet(video, player);
+    if (infer && SB.config.YAMNET) attachYamnet(video, player);
+    if (infer && SB.config.CLIP) attachClip(video, player);
     SB.log('준비됨 — scareblock.stats() / scareblock.stop() / scareblock.blurNow()');
   }
 
@@ -127,7 +149,7 @@ window.SB = window.SB || {};
 
   // 유튜브 SPA 네비게이션
   document.addEventListener('yt-navigate-finish', () => {
-    if (player?.running) { stopYamnet(); visual?.stop(); detector?.stop(); player.stop(); player = null; }
+    if (player?.running) { stopYamnet(); clip?.stop(); clip = null; visual?.stop(); detector?.stop(); player.stop(); player = null; }
     setTimeout(boot, 800);
   });
 

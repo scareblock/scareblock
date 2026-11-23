@@ -177,5 +177,21 @@ window.SB = window.SB || {};
       if (u8.length % 4) throw new Error(`PCM 바이트 수가 4의 배수가 아니다: ${u8.length}`);
       return new Float32Array(u8.buffer, u8.byteOffset, u8.length / 4);
     },
+
+    /** Uint8Array → base64 — CLIP 프레임(RGB)용 */
+    encodeBytes(u8) {
+      let s = '';
+      for (let i = 0; i < u8.length; i += 0x8000) {
+        s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      }
+      return btoa(s);
+    },
+
+    decodeBytes(b64) {
+      const s = atob(b64);
+      const u8 = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+      return u8;
+    },
   };
 })();

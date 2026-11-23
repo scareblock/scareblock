@@ -74,6 +74,17 @@ SB.InferClient = class {
     return r ? Float32Array.from(r.scores) : null;
   }
 
+  /** CLIP 상태 — {ready, error, loadMs, probe, ...} 또는 null. 모델이 커서(352 MB) 첫 로드가 오래 걸린다 */
+  clipStatus() { return this.call('clipStatus', {}, 60000); }
+
+  /** 자른 RGB [224·224·3] → {zs: {blood, syringe, spider}, probe: {blood}, ms} 또는 null */
+  async clip(rgb) {
+    if (!(rgb instanceof Uint8Array) || rgb.length !== 224 * 224 * 3) {
+      throw new Error(`CLIP 입력은 224×224×3 바이트다 (받은 것: ${rgb?.length})`);
+    }
+    return this.call('clip', { rgb });
+  }
+
   report() {
     const rt = [...this.stats.왕복_ms].sort((a, b) => a - b);
     return {
