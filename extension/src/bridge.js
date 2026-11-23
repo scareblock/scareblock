@@ -4,9 +4,9 @@
  * 페이지 쪽(MAIN)은 `chrome.runtime`이 없고, offscreen 쪽은 페이지 window가 없다. 이 스크립트만 둘 다 본다.
  * 오디오는 window 메시지로는 Float32Array 그대로 건너오지만, chrome.runtime 메시지는 JSON이라 base64로 바꾼다.
  *
- * **다른 파일에 기대지 않는다.** 처음에는 `pcm.js`를 이 항목에도 넣어 `SB.pcm.encode`를 썼는데, 11.23 실기에서
- * 추론 요청 417건이 전부 `SB is not defined`로 실패했다. 왜 이 world에 `SB`가 없었는지는 확인하지 못했다 —
- * 그래서 원인에 기대지 않고 인코딩을 여기 따로 둔다. 바이트 배치는 `SB.pcm.encode`와 같고, offscreen이 `SB.pcm.decode`로 푼다.
+ * **다른 파일에 기대지 않는다.** 처음에는 `pcm.js`를 이 항목에도 넣어 `SB.pcm.encode`를 썼는데, 같은 파일이
+ * MAIN 항목에도 있어 이 world에는 주입되지 않은 것으로 보인다 — 추론 요청 417건이 전부 `SB is not defined`로 실패했다
+ * (11.23 실기). 그래서 인코딩을 여기 따로 둔다. 바이트 배치는 `SB.pcm.encode`와 같고, offscreen이 `SB.pcm.decode`로 푼다.
  */
 (() => {
   const TAG = 'scareblock-infer';
