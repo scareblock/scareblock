@@ -50,7 +50,8 @@ function fakeDom() {
     addEventListener(t, f) { (this.ls[t] ||= []).push(f); },
     remove() { if (this.parentNode) { this.parentNode.children = this.parentNode.children.filter((c) => c !== this); this.parentNode = null; } },
   });
-  const host = { children: [], appendChild(c) { this.children.push(c); c.parentNode = this; } };
+  const host = { children: [], appendChild(c) { this.children.push(c); c.parentNode = this; },
+    contains(n) { return n === this || this.children.includes(n) || n?.inPlayer; } };
   const head = { children: [], appendChild(c) { this.children.push(c); c.parentNode = this; } };
   return {
     host,
@@ -70,6 +71,13 @@ function fakeDom() {
       return res;
     },
     keyListeners() { return keyLs.length; },
+    /** 플레이어 안을 window 캡처 단계에서 클릭 — 유튜브 캡처 리스너보다 먼저 끊기는지 */
+    capClick(inPlayer = true) {
+      const res = { stopped: false };
+      const e = { type: 'click', target: { inPlayer }, preventDefault() {}, stopImmediatePropagation() { res.stopped = true; } };
+      for (const { t, f } of [...keyLs]) if (t === 'click') f(e);
+      return res;
+    },
     click() {   // 덮개가 클릭을 받아 버리는지 — 버리지 않으면 유튜브가 재생 · 정지를 바꾼다
       const ov = host.children[0];
       let stopped = false;
@@ -228,6 +236,18 @@ ok('준비됨 · 진행 중에는 덮개가 클릭을 받아 버린다', async (
   c = dom.click();
   assert.ok(c.covered && c.stopped, '진행 중 — 화면은 비었어도 덮개는 있다');
   assert.strictEqual(dom.host.children[0].style.background, 'transparent');
+});
+
+ok('플레이어 안 클릭은 window 캡처에서 끊고, 밖(DevTools · 페이지 다른 곳)은 그대로 둔다', async () => {
+  const v = fakeVideo(0), dom = fakeDom(), s = session(0, v, dom);
+  s.prepare({ start: 50, dur: 20 });
+  await tick();
+  assert.ok(dom.capClick(true).stopped, '준비됨');
+  assert.strictEqual(dom.capClick(false).stopped, false);
+  dom.press(' ');
+  assert.ok(dom.capClick(true).stopped, '진행 중');
+  v.run(21);
+  assert.strictEqual(dom.capClick(true).stopped, false, '끝나면 돌려준다');
 });
 
 ok('Esc — 참가자 중단은 기록되고 무효, 화면에 「중단했습니다」', async () => {

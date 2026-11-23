@@ -25,8 +25,11 @@
     c019: { video: null, start: null },
     c004: { video: null, start: null },
   };
+  const VERSION = 'v3 · keyup · 클릭 가로채기 · Esc';   // 콘솔에 찍힌다 — 옛 스니펫을 붙여 넣었는지 바로 보인다
   const DUR = 300;      // 클립 길이(초) — E1 클립과 같다
   const LEAD = 1.0;     // 필터 조건: 시작점보다 LEAD초 앞에서 튼다 — 화면이 시작점을 보일 때 버퍼에 그 앞 LEAD초도 있다
+
+  const PTR = ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'];
 
   class E5Session {
     /**
@@ -204,9 +207,20 @@
           if (space || BLOCK.has(e.key)) { e.preventDefault(); e.stopImmediatePropagation(); }
         };
         for (const t of ['keydown', 'keyup', 'keypress']) this.win.addEventListener(t, this._onKey, true);
+        // 유튜브가 플레이어 클릭을 캡처 단계에서 받으면 덮개(대상)까지 오기 전에 재생 · 정지가 바뀐다.
+        // window 캡처가 가장 먼저 불리므로 여기서 플레이어 안 클릭을 끊는다
+        this._onPtr = (e) => {
+          if (this.state !== 'ready' && this.state !== 'running') return;
+          if (!this.host.contains?.(e.target)) return;
+          if (e.type === 'click' || e.type === 'dblclick') e.preventDefault();
+          e.stopImmediatePropagation();
+        };
+        for (const t of PTR) this.win.addEventListener(t, this._onPtr, true);
       } else if (!on && this._onKey) {
         for (const t of ['keydown', 'keyup', 'keypress']) this.win.removeEventListener(t, this._onKey, true);
+        for (const t of PTR) this.win.removeEventListener(t, this._onPtr, true);
         this._onKey = null;
+        this._onPtr = null;
       }
     }
 
@@ -229,7 +243,8 @@
         d.style.cssText = 'position:absolute;inset:0;z-index:10000;color:#fff;' +
           'display:flex;align-items:center;justify-content:center;font:28px system-ui,sans-serif;cursor:none';
         // 플레이어를 클릭하면 유튜브가 재생 · 정지를 바꾼다 — 덮개가 받아서 버린다
-        const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+        // mousedown은 기본 동작을 막지 않는다 — 막으면 포커스가 DevTools에 남아 Space가 페이지로 안 간다
+        const swallow = (e) => { if (e.type === 'click' || e.type === 'dblclick') e.preventDefault(); e.stopPropagation(); };
         for (const t of ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'contextmenu']) {
           d.addEventListener(t, swallow);
         }
@@ -283,7 +298,7 @@
       stop: () => s.stopByParticipant(),
       session: s,
     };
-    console.log(`[e5] ${s.condition} 조건 (${filtered ? '확장 있음 — 화면 3초 지연' : '확장 없음'}). ` +
+    console.log(`[e5] ${VERSION} — ${s.condition} 조건 (${filtered ? '확장 있음 — 화면 3초 지연' : '확장 없음'}). ` +
       '안정적인 볼륨 끔 · 광고 없음 · 음량 확인 뒤 e5.prepare(\'c019\')');
   }
 })();
