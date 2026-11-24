@@ -195,7 +195,7 @@ python3 -m eval.e1 --selftest
 | `e1.py` | lookahead 스윕, 표 출력, 발화율 스윕(`--rate-sweep`), 자체 점검 |
 | `yamnet.py` | 사전학습 YAMNet 클래스 점수 → 탐지 (11.05 조건부 열, 학습 없음). 모델 만들기는 [yamnet-setup](../docs/yamnet-setup.md) |
 | `e3.py` | E3 — 종류별 유지 시간 T와 필요 lookahead. 규칙(E1) · CLIP 점수로 노출 비율을 L별로 ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7079604506)) |
-| `siren.py` | 사이렌 — YAMNet 기존 클래스 4개(390 · 317 · 318 · 319)에 임계값만. θ는 neutral-dev 가림 5% ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7090863226)) |
+| `siren.py` | 사이렌 — YAMNet 기존 클래스 4개(390 · 317 · 318 · 319)에 임계값만. θ는 neutral-dev 가림 5% ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7090863226)). `eval/requirements.txt` 환경(scipy)에서 돈다 |
 | `iaa.py` | 주석자 간 일치도 — 사건 매칭 κ · 100 ms 구간 κ · PSA를 한 번에 ([labeling-guide §6](../docs/labeling-guide.md#6-주석자-간-일치도)) |
 
 **홉은 10 ms다.** PoC의 50 ms로는 놀람 반사 문헌이 말하는 2~100 ms 상승 시간을
