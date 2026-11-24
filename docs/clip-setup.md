@@ -35,6 +35,16 @@ _local/.venv-clip/bin/pip install torch==2.15.0 torchvision==0.29.2 onnx==1.23.2
 `clip`은 OpenAI 공식 저장소의 커밋을 고정해서 받는다. 다른 버전이어도 되지만, 그때는 4절의 sha256이 아니라
 4절의 「값으로 확인」으로 본다.
 
+**`Failed to build 'clip'`이 나면** (11.24, pip 26.2) — `clip`의 `setup.py`가 `pkg_resources`를 쓰는데, pip이 빌드할 때
+새로 받는 setuptools(81 이상)에는 그게 없다. 나머지를 먼저 깔고, `clip`만 옛 setuptools로 따로 깐다.
+
+```bash
+_local/.venv-clip/bin/pip install torch==2.15.0 torchvision==0.29.2 onnx==1.23.2 onnxruntime==1.31.1 \
+  numpy==2.5.4 pillow==13.0.0 ftfy regex tqdm packaging "setuptools<81" wheel
+_local/.venv-clip/bin/pip install --no-build-isolation \
+  "clip @ git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1"
+```
+
 ## 2. 변환 — 가중치 받기 · 문장 임베딩 · ONNX 내보내기
 
 저장소 루트에서 돌린다. 처음 한 번은 `clip.load`가 공식 가중치를 받는다(353,976,522 B,
@@ -101,13 +111,15 @@ bash extension/fetch-deps.sh     # models/ ← clip_visual.onnx · clip_heads.js
 
 ## 4. 같은 파일인지 확인한다
 
-**바이트로 확인** — 1절 버전 그대로 만들었으면 셋 다 같다 (2026.11.23, 빈 폴더에서 다시 만들어 확인).
+**바이트로 확인** — 1절 버전 그대로 만들었으면 `visual.onnx` · `text_emb.npy`는 같다 (2026.11.23, 11.24 혜인 노트북에서도 같음).
+`meta.json`은 **다를 수 있다** — 2절의 검사 입력이 시드 없는 `torch.randn`이라 `onnx_vs_torch_max_abs`가 매번 조금 다르다
+(11.23 1.2e-5 · 11.24 1.6e-5). 아래 「값으로 확인」으로 본다.
 
 ```bash
 shasum -a 256 _local/models/clip/{visual.onnx,text_emb.npy,meta.json}
 # 4a380c28356ae5223408842a05afab49f0cfcb48580d43b7e59213532bcf9cc9  visual.onnx
 # 2a922507a401c5b2641a4c13a8b4f3f9e4a26c1ea6e8bd2bddc15f56cf8cc2c2  text_emb.npy
-# eb8e6fe72bd329a8ddc019f81e50582ac036d932b7cc3ad0cacdbc3444adae06  meta.json
+# eb8e6fe72bd329a8ddc019f81e50582ac036d932b7cc3ad0cacdbc3444adae06  meta.json  (11.23 — 위 이유로 다를 수 있다)
 ```
 
 **값으로 확인** — 버전이 달라 바이트가 다르면 이것으로 본다.

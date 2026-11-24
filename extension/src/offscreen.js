@@ -91,8 +91,10 @@
         const t0 = performance.now();
         ort.env.wasm.wasmPaths = chrome.runtime.getURL('vendor/');
         ort.env.wasm.numThreads = 1;
-        const r = await fetch(chrome.runtime.getURL(CLIP_HEADS));
-        if (!r.ok) throw new Error(`${CLIP_HEADS} 없음 — fetch-deps.sh`);
+        // 확장 안에 없는 파일을 fetch하면 404가 아니라 「Failed to fetch」로 던진다 — 원인을 알 수 있게 바꿔 말한다
+        const missing = `CLIP 모델 없음 — docs/clip-setup.md대로 만든 뒤 extension/fetch-deps.sh (${CLIP_HEADS})`;
+        const r = await fetch(chrome.runtime.getURL(CLIP_HEADS)).catch(() => null);
+        if (!r?.ok) throw new Error(missing);
         clipHeads = await r.json();
         clipSession = await ort.InferenceSession.create(chrome.runtime.getURL(CLIP_MODEL), {
           executionProviders: ['wasm'],
