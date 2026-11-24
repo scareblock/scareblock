@@ -36,6 +36,7 @@ global.chrome = {
   runtime: {
     getURL: (p) => `chrome-extension://sb/${p}`,
     onMessage: { addListener: (fn) => rtListeners.push(fn) },
+    onInstalled: { addListener: () => {} },   // 첫 설치 안내 탭(설정 화면) — 여기서는 보지 않는다
     sendMessage: (msg) => new Promise((resolve, reject) => {
       const m = JSON.parse(JSON.stringify(msg));        // 실제처럼 JSON만 건넌다
       let async = false;

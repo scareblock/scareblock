@@ -11,6 +11,7 @@ SB.config = {
   FADE_DB: 0.25,         // 블러 중 음량 배율
   DETECTOR: 'rule',      // 'rule' | 'fake' — fake는 10초마다 가짜 트리거 (M1 계측용)
   TRIGGER_TAIL_S: 1.5,   // 순간 사건 + 꼬리 — README 인터페이스 계약
+  WARN_LEAD_S: 1.5,      // 경고만 모드: 화면에 닿기 이만큼 전부터 「곧 …」을 띄운다 (지연 3초 안)
   VISUAL_FPS: 2,         // 시각 특징 샘플링 — CLIP과 같은 1~2fps 전제 (README 「모델이 아닌 것」)
   YAMNET: true,          // 별도 문서 추론. offscreen이 준비됐다고 답할 때만 오디오 탭을 붙인다 — 모델이 없으면 비용 0
   SPEECH_GATE: true,     // 말소리 기각(#40). YAMNet이 없으면 판정 없이 그대로 가린다

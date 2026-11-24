@@ -65,6 +65,35 @@ window.SB = window.SB || {};
     SB.yamnet = null;
   }
 
+  // ── 사용자 설정 ── 중계가 chrome.storage에서 읽어 넘겨 준다(settings.js). 오기 전에는 기본값
+  let settings = SB.normalizeSettings(null);
+  let gotSettings = null;
+  const settingsReady = new Promise((res) => { gotSettings = res; setTimeout(res, 500); });   // 중계가 없어도 0.5초 뒤 기본값으로 시작
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || e.data?.tag !== SB.SETTINGS_TAG || e.data.dir !== 'push') return;
+    const prev = settings;
+    settings = SB.normalizeSettings(e.data.settings);
+    gotSettings();
+    onSettings(prev);
+  });
+  window.postMessage({ tag: SB.SETTINGS_TAG, dir: 'get' }, location.origin);
+
+  function onSettings(prev) {
+    if (!settings.enabled) {
+      if (player?.running) { teardown(); SB.log('꺼짐 — 설정에서 껐다. 영상은 원래대로 재생된다'); }
+      return;
+    }
+    if (!prev.enabled) { boot(); return; }        // 다시 켰다 — 붙일 때 설정을 건다
+    if (player?.running) {
+      const c = SB.applySettings(settings, { player, detector });
+      if (c.length) SB.log(`설정 — ${c.join(' · ')}`);
+    }
+  }
+
+  function teardown() {
+    stopYamnet(); clip?.stop(); clip = null; visual?.stop(); detector?.stop(); player?.stop(); player = null;
+  }
+
   function findVideo() {
     return document.querySelector('video.html5-main-video') ||
            document.querySelector('#movie_player video');
@@ -121,13 +150,16 @@ window.SB = window.SB || {};
       yamnet: (t) => yamnetTop(t ?? video.currentTime - 1.5),
       // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
       setSurge: (n) => detector.setSurge?.(n),
-      stop: () => { stopYamnet(); clip?.stop(); clip = null; visual?.stop(); detector.stop(); player.stop(); player = null; },
+      stop: () => teardown(),
+      settings: () => ({ ...settings }),
       blurNow: (dur = 1.5) => player.addTriggers([{
         time: video.currentTime, category: 'manual',
         confidence: 1, duration: dur, source: 'manual',
       }]),
       player: () => player,
     };
+    const applied = SB.applySettings(settings, { player, detector });
+    if (applied.length) SB.log(`설정 — ${applied.join(' · ')}`);
     if (infer && SB.config.YAMNET) attachYamnet(video, player);
     if (infer && SB.config.CLIP) attachClip(video, player);
     SB.log('준비됨 — scareblock.stats() / scareblock.stop() / scareblock.blurNow()');
@@ -144,7 +176,9 @@ window.SB = window.SB || {};
     return { 시각: +t.toFixed(2), Speech: +s[0].toFixed(3), 상위5: top };
   }
 
-  function boot() {
+  async function boot() {
+    await settingsReady;
+    if (!settings.enabled) return;
     // 콘텐츠 스크립트는 매치되는 URL로 **문서가 로드될 때만** 주입된다. /watch로만
     // 매치하면 홈·검색에서 영상을 클릭하는 SPA 경로에는 주입 자체가 없어 확장이
     // 없는 것과 같다. 그래서 youtube.com 전체로 매치하고 여기서 걸러낸다.
@@ -157,7 +191,7 @@ window.SB = window.SB || {};
 
   // 유튜브 SPA 네비게이션
   document.addEventListener('yt-navigate-finish', () => {
-    if (player?.running) { stopYamnet(); clip?.stop(); clip = null; visual?.stop(); detector?.stop(); player.stop(); player = null; }
+    if (player?.running) teardown();
     setTimeout(boot, 800);
   });
 
