@@ -63,4 +63,20 @@
       reply(m.id, { ok: false, error: String(err?.message || err) });
     }
   });
+
+  // ── 설정 ── chrome.storage.local의 settings를 페이지에 넘긴다(settings.js). 페이지는 처음에 한 번 달라고 하고,
+  // 바뀌면 여기서 다시 보낸다. 값 검사는 페이지(SB.normalizeSettings)가 한다 — 여기는 그대로 옮기기만 한다
+  const STAG = 'scareblock-settings';
+  async function pushSettings() {
+    let settings = null;
+    try { ({ settings } = await chrome.storage.local.get('settings')); } catch { /* 저장소를 못 읽으면 페이지는 기본값 */ }
+    window.postMessage({ tag: STAG, dir: 'push', settings: settings ?? null }, location.origin);
+  }
+  window.addEventListener('message', (e) => {
+    if (e.source === window && e.data?.tag === STAG && e.data.dir === 'get') pushSettings();
+  });
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === 'local' && changes.settings) pushSettings();
+  });
+  pushSettings();
 })();

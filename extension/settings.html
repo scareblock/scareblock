@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scareblock 설정</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #1c1c1e; --muted: #6b6b70; --line: #e3e3e6; --accent: #b3261e; --card: #f6f6f8;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1c1e; --fg: #f2f2f5; --muted: #a0a0a6; --line: #38383c; --accent: #ff6b5e; --card: #2a2a2d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  main { width: 340px; padding: 16px; }
+  body.page main { width: auto; max-width: 560px; margin: 32px auto; }
+  h1 { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
+  h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 18px 0 8px; }
+  p { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg label { text-align: center; padding: 7px 4px; cursor: pointer; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg input:checked + span { font-weight: 600; color: var(--accent); }
+  .seg label:has(input:checked) { background: var(--card); }
+  .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .scale { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .card { background: var(--card); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+  .card ol { margin: 6px 0 0; padding-left: 20px; }
+  button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+  #status { font-size: 12px; color: var(--muted); min-height: 1.5em; }
+  fieldset { border: 0; margin: 0; padding: 0; }
+  fieldset:disabled { opacity: .45; }
+</style>
+<body>
+<main>
+  <h1>scareblock <span id="status" aria-live="polite"></span></h1>
+  <p class="muted">유튜브를 3초 늦게 보여 주고, 그 사이 갑작스러운 장면을 찾아 화면에 닿기 전에 가려요.</p>
+
+  <section id="welcome" class="card" hidden>
+    <strong>처음 쓰기 전에</strong>
+    <ol>
+      <li>유튜브 영상을 열면 처음 3초 동안 「안전 버퍼 채우는 중…」이 보여요. 그다음부터 3초 늦게 재생돼요.</li>
+      <li><strong>안정적인 볼륨을 꺼 주세요.</strong> 영상 오른쪽 아래 톱니바퀴 → 안정적인 볼륨 → 끔.
+        켜 두면 갑자기 커지는 소리가 줄어들어, 점프 스케어를 절반 가까이 놓쳐요.</li>
+      <li>아래에서 가릴지 · 미리 알려만 줄지, 얼마나 민감하게 반응할지, 어떤 장면을 볼지 고를 수 있어요. 바꾸면 바로 적용돼요.</li>
+    </ol>
+    <p><button id="gotit" type="button">알겠어요</button></p>
+  </section>
+
+  <div class="row">
+    <label for="enabled"><strong>켜기</strong></label>
+    <input id="enabled" type="checkbox">
+  </div>
+
+  <fieldset id="opts">
+    <h2>어떻게 할까요</h2>
+    <div class="seg" role="radiogroup" aria-label="모드">
+      <label><input type="radio" name="mode" value="blur"><span>가리기</span></label>
+      <label><input type="radio" name="mode" value="warn"><span>경고만</span></label>
+    </div>
+    <p class="muted" id="modeHelp"></p>
+
+    <h2><label for="sensitivity">민감도</label> <span id="sensVal"></span></h2>
+    <input id="sensitivity" type="range" min="1" max="5" step="1">
+    <div class="scale"><span>덜 민감</span><span>기본</span><span>더 민감</span></div>
+    <p class="muted">더 민감할수록 작은 소리 변화에도 반응해요. 그만큼 평범한 장면을 잘못 가리는 일도 늘어요.</p>
+
+    <h2>무엇을 볼까요</h2>
+    <div class="row"><label for="cat-jumpscare">점프 스케어 <span class="muted">— 갑자기 커지는 소리</span></label><input id="cat-jumpscare" type="checkbox"></div>
+    <div class="row"><label for="cat-blood">피</label><input id="cat-blood" type="checkbox"></div>
+    <div class="row"><label for="cat-spider">거미</label><input id="cat-spider" type="checkbox"></div>
+    <div class="row"><label for="cat-syringe">주사기</label><input id="cat-syringe" type="checkbox"></div>
+    <p class="muted">피 · 거미 · 주사기는 이미지 모델(CLIP)이 설치돼 있을 때만 찾아요.</p>
+  </fieldset>
+
+  <p class="muted">⚠ 유튜브의 「안정적인 볼륨」은 꺼 두세요 — 켜져 있으면 점프 스케어를 덜 찾아요.</p>
+</main>
+<script src="src/settings.js"></script>
+<script src="src/settings-page.js"></script>
+</body>
+</html>

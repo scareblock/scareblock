@@ -32,3 +32,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+// 첫 설치 때 안내 탭을 연다 — 안정적인 볼륨 끄기 · 3초 지연 · 설정 위치를 알려 준다(settings.html ?welcome)
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('settings.html?welcome') });
+});
