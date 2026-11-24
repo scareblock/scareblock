@@ -63,4 +63,21 @@
       reply(m.id, { ok: false, error: String(err?.message || err) });
     }
   });
+
+  // ── CLIP 자르기 프레임 ── 유튜브 CSP가 페이지 Worker를 막아서(worker-src), 자르기를 확장 프레임(다른 프로세스)에서 한다
+  // (clip-frame.js). CLIP이 켜졌을 때만 페이지가 달라고 하고, 그때 이 world에서 넣는다
+  const FTAG = 'sb-clipframe';
+  function addClipFrame() {
+    if (document.getElementById('scareblock-clip-frame')) return;
+    const f = document.createElement('iframe');
+    f.id = 'scareblock-clip-frame';
+    f.src = chrome.runtime.getURL('clip-frame.html');
+    f.setAttribute('aria-hidden', 'true');
+    f.tabIndex = -1;
+    f.style.cssText = 'position:fixed;width:0;height:0;border:0;left:-9999px;top:0;visibility:hidden';
+    (document.body || document.documentElement).appendChild(f);
+  }
+  window.addEventListener('message', (e) => {
+    if (e.source === window && e.data?.tag === FTAG && e.data.op === 'need') addClipFrame();
+  });
 })();

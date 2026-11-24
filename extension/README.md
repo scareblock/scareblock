@@ -271,8 +271,13 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 - **피는 보강 모델**이 `models/clip_heads.json`에 있으면 그것을, 없으면 zero-shot을 쓴다. 거미 · 주사기는 zero-shot
 - **모델은 eval과 같은 fp32 파일(352 MB)이다.** 줄이면(int8 등) 점수가 달라져 θ가 맞지 않는다. 만드는 법은 [clip-setup](../docs/clip-setup.md)
 - **한 번에 한 장만 보낸다.** 앞 장이 안 끝났으면 그 프레임은 건너뛴다(`건너뜀`). 응답이 없으면 가리지 않는다
-- **비용** (실제 브라우저, onnxruntime-web 1.20.1 wasm 1스레드): 페이지 자르기 16–23 ms(**1280×720 프레임**) · 추론 약 230 ms/장.
-  1080p에서는 자르기가 더 든다 — 실기에서 `scareblock.clip().자르기_ms`로 본다.
+- **자르기는 확장 프레임에서 한다(11.24).** 처음에는 페이지에서 잘랐는데, 1080p에서 메인 스레드 **66 ms**라 CLIP을 켜면
+  1초마다 렌더가 끊겼다(127초에 127번, M1 실패). 유튜브 CSP는 `worker-src`로 blob · data Worker를 둘 다 막는다.
+  그래서 숨긴 확장 프레임(`clip-frame.html`)을 넣고, 페이지는 `createImageBitmap`으로 떠서 **옮기기만** 한다(0.3 ms).
+  출처가 다른 프레임은 다른 프로세스에서 돌아 페이지를 멈추지 않는다 — 자르는 동안 32 ms 넘는 rAF 간격은 5/300,
+  자르지 않을 때 4/228로 같았다. 계산은 같은 `clip-prep.js`라 바이트가 같고, 자른 결과는 프레임이 offscreen에 바로 보낸다
+- **비용** (실제 브라우저, onnxruntime-web 1.20.1 wasm 1스레드): 페이지 0.3 ms · 프레임 자르기 약 62 ms(1080p, 다른 프로세스) ·
+  추론 약 210 ms/장. `scareblock.clip()`의 `페이지_ms` · `프레임_자르기_ms`로 본다
   offscreen은 한 스레드 · 한 줄이라 CLIP이 도는 동안 YAMNet 요청이 최대 그만큼 기다린다 — 말소리 거르기(#52)는 시간이 모자라면 그냥 가린다
 - **첫 로드 동안은 YAMNet이 멈춘다.** 영상을 열면 `clipStatus`가 같은 줄에서 모델(352 MB)을 올리므로, 그동안 온 YAMNet 요청은
   5초 안에 답을 못 받아 null(시간 초과)이 될 수 있다 → 그 사이 탐지는 말소리 확인 없이 가린다. 영상 시작 직후 `scareblock.infer()`의 `시간초과`로 본다.
@@ -283,6 +288,7 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
 ```bash
 node extension/test/clip-prep.test.js      # 18/18 — 같은 RGB → PIL과 같은 바이트 · 같은 텐서 (16:9 아닌 크기 포함)
 node extension/test/clip-sampler.test.js   # 7/7 — 판정 + 저장된 임베딩 → eval 점수와 같다(zero-shot · 보강 모델)
+node extension/test/clip-frame.test.js     # 9/9 — 프레임이 페이지와 같은 바이트로 자름 · 비트맵은 옮김 · 실패는 null · 다른 출처 무시
 # 모델 · _local이 없으면 대조를 건너뛰고 「건너뜀」이라고 쓴다 — 그때의 「통과」는 판정 로직만 본 것이다
 # 실제 브라우저 wasm: extension/test/clip-browser.html (파일 안 주석대로 띄운다)
 #   c018 두 프레임 — eval 점수와 최대 차이 1.3e-5

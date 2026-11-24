@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>scareblock clip frame</title>
+<!-- 유튜브 페이지 안에 숨겨 두는 확장 프레임. 다른 출처라 Chrome이 다른 프로세스(다른 스레드)에서 돌린다 —
+     CLIP 프레임 자르기(1080p에서 약 45 ms)를 유튜브 메인 스레드에서 빼려고 둔다. 유튜브 CSP는 worker-src로 Worker를 막는다(11.24) -->
+<script src="src/pcm.js"></script>
+<script src="src/clip-prep.js"></script>
+<script src="src/clip-frame.js"></script>

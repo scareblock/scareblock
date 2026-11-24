@@ -46,5 +46,15 @@
       "world": "ISOLATED",
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "clip-frame.html"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
+      ]
+    }
   ]
 }
