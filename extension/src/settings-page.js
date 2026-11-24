@@ -11,7 +11,12 @@
     blur: '그 장면을 흐리게 가리고 소리를 줄여요.',
     warn: '가리지 않아요. 화면에 닿기 1.5초 전부터 「⚠ 곧 …」을 위에 띄워요.',
   };
-  const SENS_LABEL = { 1: '1 · 가장 덜 민감', 2: '2', 3: '3 · 기본', 4: '4', 5: '5 · 가장 민감' };
+  const SENS_NAME = { 1: '1 · 가장 덜 민감', 2: '2', 3: '3 · 기본', 4: '4', 5: '5 · 가장 민감' };
+  // 잰 발화율을 같이 보여 준다 — 「얼마나 자주 가리나」를 숫자로 알 수 있게(settings.js SENSITIVITY_RATE)
+  const SENS_LABEL = Object.fromEntries(Object.entries(SENS_NAME).map(([k, v]) => {
+    const r = SB.SENSITIVITY_RATE[k];
+    return [k, r == null ? v : `${v} — 공포 영상에서 1분에 약 ${r.toFixed(1)}번`];
+  }));
 
   let s = SB.normalizeSettings(null);
   let statusTimer = null;

@@ -22,9 +22,13 @@ SB.CATEGORY_LABEL = {
 /**
  * 민감도 1~5 → 규칙 탐지기 surge_of_quiet. 높을수록 작은 급등에도 반응한다.
  * **3 = 20 = E1 · #35 사전 등록 동작점.** 데모용 5(#46)는 가장 민감한 쪽이다.
- * 일반 영상에서 자주 울리는 쪽(낮은 값)은 말소리 기각(#52)이 일부를 거른다.
+ * 단계는 발화율을 **잰 값**에 맞췄다(#61 리뷰) — `eval/README.md` 「동작점 고르기」의 라벨 없는 스윕 surge 5 · 20 · 35 · 60.
+ * 4(surge 10)만 아직 안 쟀다 — `eval.e1 --rate-sweep surge_of_quiet=10`으로 재면 SENSITIVITY_RATE에 넣는다.
  */
-SB.SENSITIVITY_SURGE = { 1: 40, 2: 30, 3: 20, 4: 10, 5: 5 };
+SB.SENSITIVITY_SURGE = { 1: 60, 2: 35, 3: 20, 4: 10, 5: 5 };
+
+/** 단계마다 공포 영상(44클립 · 212.7분, 2026.09.15)에서 1분에 울린 횟수 — 라벨 없이 잰 값. 설정 화면이 보여 준다. null = 안 잼 */
+SB.SENSITIVITY_RATE = { 1: 0.49, 2: 1.18, 3: 2.19, 4: null, 5: 6.37 };
 
 SB.SETTINGS_DEFAULT = Object.freeze({
   enabled: true,
@@ -51,6 +55,9 @@ SB.normalizeSettings = (raw) => {
     onboarded: typeof r.onboarded === 'boolean' ? r.onboarded : d.onboarded,
   };
 };
+
+/** CLIP 종류를 하나라도 켰을 때만 CLIP을 돌린다 — 다 끄면 1초마다 돌고 버리기만 한다(#61 리뷰) */
+SB.clipWanted = (s, cfg = SB.config) => !!cfg.CLIP && (cfg.CLIP_CATS || []).some((c) => s.cats?.[c]);
 
 SB.surgeFor = (level) => SB.SENSITIVITY_SURGE[level] ?? SB.SENSITIVITY_SURGE[SB.SETTINGS_DEFAULT.sensitivity];
 
