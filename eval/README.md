@@ -142,11 +142,12 @@ M1 실측 뒤 렌더링 시간을 반영하려면 `--render-s 값`.
 
 ```bash
 python3 -m eval.e1 --audio _local/dataset/wav --clips _local/dataset/clips.csv \
-  --rate-sweep surge_of_quiet=5,20,35,60
+  --rate-sweep surge_of_quiet=5,10,20,35,60
 ```
 
 44클립·212.7분(2026.09.15)에서 6.37 · 2.19 · 1.18 · 0.49건/분이고, 같은 표가
 [labeling-guide §4](../docs/labeling-guide.md#4-클립-수집과-절단)에 실려 있다.
+surge 10(확장 민감도 4)은 같은 데이터에서 3.94건/분이다(2026.11.24, #65 리뷰 — 나머지 넷도 같은 값으로 다시 나왔다).
 6.53 · 2.36 · 1.27 · 0.51은 **33클립 165분에서 잰 옛 값**으로, §4에 경위로 남아 있다.
 
 **데이터 없이 파이프라인만 점검:**

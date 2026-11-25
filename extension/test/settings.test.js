@@ -39,11 +39,10 @@ ok('이상한 값은 기본값으로, 모르는 키는 버린다', () => {
   assert.strictEqual(SB.normalizeSettings({ sensitivity: '5' }).sensitivity, 5);
 });
 
-ok('민감도 단계는 잰 발화율에 맞는다 — 1 · 2 · 3 · 5는 잰 값, 4만 안 잼', () => {
+ok('민감도 단계는 잰 발화율에 맞는다 — 다섯 단계 모두 잰 값', () => {
   assert.deepStrictEqual(SB.SENSITIVITY_SURGE, { 1: 60, 2: 35, 3: 20, 4: 10, 5: 5 });
-  for (const k of [1, 2, 3, 5]) assert.ok(SB.SENSITIVITY_RATE[k] > 0, k);
-  assert.strictEqual(SB.SENSITIVITY_RATE[4], null);
-  const r = [1, 2, 3, 5].map((k) => SB.SENSITIVITY_RATE[k]);
+  assert.deepStrictEqual(SB.SENSITIVITY_RATE, { 1: 0.49, 2: 1.18, 3: 2.19, 4: 3.94, 5: 6.37 });
+  const r = [1, 2, 3, 4, 5].map((k) => SB.SENSITIVITY_RATE[k]);
   for (let i = 1; i < r.length; i++) assert.ok(r[i] > r[i - 1], '더 민감할수록 더 자주 울린다');
 });
 
