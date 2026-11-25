@@ -196,7 +196,7 @@ python3 -m eval.e1 --selftest
 | `e1.py` | lookahead 스윕, 표 출력, 발화율 스윕(`--rate-sweep`), 자체 점검 |
 | `yamnet.py` | 사전학습 YAMNet 클래스 점수 → 탐지 (11.05 조건부 열, 학습 없음). 모델 만들기는 [yamnet-setup](../docs/yamnet-setup.md) |
 | `e3.py` | E3 — 종류별 유지 시간 T와 필요 lookahead. 규칙(E1) · CLIP 점수로 노출 비율을 L별로 ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7079604506)) |
-| `speech_gate.py` | 말소리 기각 측정 — 규칙 탐지 뒤 YAMNet 패치 하나로 `Speech ≥ θ` 이고 20개 클래스보다 크면 기각. 개발 세트에서 θ를 고르고 시험 세트는 한 번만 ([#35 10.03 등록](https://github.com/scareblock/scareblock/issues/35)) · 확장 적용은 `extension/src/speech-gate.js`(#52) |
+| `speech_gate.py` | 말소리 기각 측정 — 규칙 탐지 뒤 YAMNet 패치 하나로 `Speech ≥ θ` 이고 20개 클래스보다 크면 기각. 개발 세트에서 θ를 고르고 시험 세트는 한 번만 ([#35 10.03 등록](https://github.com/scareblock/scareblock/issues/35)) · 확장 적용은 `extension/src/speech-gate.js`(#52). 재현 명령 · 분할 파일 위치는 파일 첫 주석 |
 | `siren.py` | 사이렌 — YAMNet 기존 클래스 4개(390 · 317 · 318 · 319)에 임계값만. θ는 neutral-dev 가림 5% ([#35 등록](https://github.com/scareblock/scareblock/issues/35#issuecomment-7090863226)). `eval/requirements.txt` 환경(scipy)에서 돈다 |
 | `iaa.py` | 주석자 간 일치도 — 사건 매칭 κ · 100 ms 구간 κ · PSA를 한 번에 ([labeling-guide §6](../docs/labeling-guide.md#6-주석자-간-일치도)) |
 

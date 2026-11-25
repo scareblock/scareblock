@@ -1,4 +1,4 @@
-"""#40 새 기준 — 「말소리면 버린다」. #35 10.03 사전 등록 그대로.
+"""말소리 기각 — 「말소리면 버린다」. #35 10.03 사전 등록 · #47 결정 그대로 (처음 코드는 닫힌 #40에 있었다).
 
 규칙 탐지(동작점 20)가 울리면 사건 시작부터 YAMNet 패치 하나(0.975초)를 보고,
 `Speech ≥ θ` **이고** `Speech > #43 등록 20개 클래스의 최댓값`이면 기각한다.
@@ -8,7 +8,13 @@
     # 개발 세트 — θ 후보 0.1…0.9를 재고 등록한 규칙으로 하나를 고른다
     python3 -m eval.speech_gate dev --labels … --audio … --neutral-audio … --split-dir …
     # 시험 세트 — 위에서 고른 θ로 **한 번만**. θ 찾기는 하지 않는다
-    python3 -m eval.speech_gate test --theta 0.5 …
+    python3 -m eval.speech_gate test --theta 0.1 …
+
+포스터 Table 3 · #35 숫자 재현 (11.04 `speech_test_B.txt`와 같은 표가 나온다):
+    python3 -m eval.speech_gate test --theta 0.1 --labels _local/dataset/labels-B.csv \
+        --audio _local/dataset/wav --neutral-audio _local/dataset/neutral/wav --split-dir _local/dataset/split-1003
+  - 분할 파일 `_local/dataset/split-1003/{horror,neutral}-{dev,test}.txt` — 클립 id 한 줄에 하나, #35 10.03에 등록한 나눔
+  - θ 0.1은 dev 모드로 고른 값이다(같은 인자에서 `test --theta` 대신 `dev`)
     python3 -m eval.speech_gate --selftest
 
 **시험 세트에는 θ 스윕이 없다.** 시험 세트를 보고 θ를 고르면 사전 등록의 의미가 없어진다.
@@ -168,7 +174,7 @@ def _selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="#40 말소리 기각 기준 (#35 10.03 사전 등록)")
+    ap = argparse.ArgumentParser(description="말소리 기각 (#35 10.03 사전 등록 · #47)")
     ap.add_argument("mode", nargs="?", choices=["dev", "test"])
     ap.add_argument("--labels"); ap.add_argument("--audio"); ap.add_argument("--neutral-audio")
     ap.add_argument("--split-dir", help="horror-dev.txt · horror-test.txt · neutral-dev.txt · neutral-test.txt")
