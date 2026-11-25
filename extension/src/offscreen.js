@@ -13,7 +13,10 @@
   const state = { ready: false, error: null, loadMs: null, runs: 0, runMs: [], classes: null };
   let session = null;
   let loading = null;
-  let queue = Promise.resolve();   // wasm 세션은 한 번에 하나씩 돌린다
+  // 줄은 모델마다 따로 — 같은 세션은 한 번에 하나씩, 다른 모델은 서로 기다리지 않는다(#54 리뷰 🟡2).
+  // 상태 확인(status · clipStatus)은 줄에 서지 않는다 — 모델을 올리는 약속(promise)만 같이 쓴다
+  let yamnetQueue = Promise.resolve();
+  let clipQueue = Promise.resolve();
 
   function load() {
     if (!loading) {
@@ -76,30 +79,82 @@
   // 모델은 eval/clip_zeroshot이 쓰는 _local/models/clip/visual.onnx와 같은 파일(fp32)이다 — 줄이면 점수가 달라져
   // 오프라인에서 정한 θ가 맞지 않는다. heads는 문장 임베딩 · logit_scale · 피 보강 모델 계수(fetch-deps.sh가 만든다).
   // YAMNet과 따로 올린다 — 하나가 없어도 다른 하나는 돈다.
+  //
+  // **CLIP은 전용 Worker(clip-worker.js)에서 돈다.** 이 문서에서 돌리면 CLIP 한 장(약 210 ms) 동안 YAMNet이 같은 스레드에서
+  // 기다린다(CLIP 켜면 YAMNet 왕복 26 → 296 ms, #64 실기). Worker를 못 띄우면 예전처럼 이 문서 안에서 돈다(mode: 'inline').
   const CLIP_MODEL = 'models/clip_visual.onnx';
   const CLIP_HEADS = 'models/clip_heads.json';
-  const clipState = { ready: false, error: null, loadMs: null, runs: 0, runMs: [], probe: null };
+  const CLIP_MISSING = `CLIP 모델 없음 — docs/clip-setup.md대로 만든 뒤 extension/fetch-deps.sh (${CLIP_HEADS})`;
+  const clipState = { ready: false, error: null, loadMs: null, runs: 0, runMs: [], probe: null, mode: null };
   let clipSession = null;
   let clipHeads = null;
   let clipLoading = null;
+  let clipWorker = null;   // { w, seq, pending: Map }
+
+  /** 전용 Worker를 띄우고 모델을 올린다. Worker를 못 띄우면 던진다 — 부르는 쪽이 이 문서 안으로 물러난다 */
+  function loadInWorker() {
+    return new Promise((resolve, reject) => {
+      let w;
+      try { w = new Worker(chrome.runtime.getURL('src/clip-worker.js')); } catch (e) { reject(e); return; }
+      const cw = { w, seq: 0, pending: new Map() };
+      w.onerror = (e) => {
+        e.preventDefault?.();
+        const err = new Error(`CLIP Worker 시작 실패${e.message ? ` — ${e.message}` : ''}`);
+        for (const p of cw.pending.values()) p.reject(err);
+        cw.pending.clear();
+        if (clipWorker === cw) { clipWorker = null; clipLoading = null; clipState.ready = false; clipState.error = err.message; }
+        reject(err);
+      };
+      w.onmessage = (e) => {
+        const m = e.data || {};
+        if (m.op === 'load') {
+          if (!m.ok) { w.terminate(); reject(new Error(m.error)); return; }
+          clipWorker = cw;
+          resolve(m);
+        } else if (m.op === 'run') {
+          const p = cw.pending.get(m.id);
+          if (!p) return;
+          cw.pending.delete(m.id);
+          m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
+        }
+      };
+      w.postMessage({ op: 'load', modelUrl: chrome.runtime.getURL(CLIP_MODEL),
+        headsUrl: chrome.runtime.getURL(CLIP_HEADS), wasmPaths: chrome.runtime.getURL('vendor/') });
+    });
+  }
+
+  /** 예전 방식 — 이 문서 안에서 올린다 */
+  async function loadInline() {
+    if (typeof ort === 'undefined') throw new Error('onnxruntime-web이 없다 — extension/fetch-deps.sh를 돌린다');
+    if (!SB.clipNormalize) throw new Error('clip-prep.js가 안 올라왔다');
+    ort.env.wasm.wasmPaths = chrome.runtime.getURL('vendor/');
+    ort.env.wasm.numThreads = 1;
+    // 확장 안에 없는 파일을 fetch하면 404가 아니라 「Failed to fetch」로 던진다 — 원인을 알 수 있게 바꿔 말한다
+    const r = await fetch(chrome.runtime.getURL(CLIP_HEADS)).catch(() => null);
+    if (!r?.ok) throw new Error(CLIP_MISSING);
+    clipHeads = await r.json();
+    clipSession = await ort.InferenceSession.create(chrome.runtime.getURL(CLIP_MODEL), {
+      executionProviders: ['wasm'],
+    });
+    return { probe: clipHeads.probe ? clipHeads.probe.cat : null };
+  }
 
   function loadClip() {
     if (!clipLoading) {
       clipLoading = (async () => {
-        if (typeof ort === 'undefined') throw new Error('onnxruntime-web이 없다 — extension/fetch-deps.sh를 돌린다');
-        if (!SB.clipNormalize) throw new Error('clip-prep.js가 안 올라왔다');
         const t0 = performance.now();
-        ort.env.wasm.wasmPaths = chrome.runtime.getURL('vendor/');
-        ort.env.wasm.numThreads = 1;
-        // 확장 안에 없는 파일을 fetch하면 404가 아니라 「Failed to fetch」로 던진다 — 원인을 알 수 있게 바꿔 말한다
-        const missing = `CLIP 모델 없음 — docs/clip-setup.md대로 만든 뒤 extension/fetch-deps.sh (${CLIP_HEADS})`;
-        const r = await fetch(chrome.runtime.getURL(CLIP_HEADS)).catch(() => null);
-        if (!r?.ok) throw new Error(missing);
-        clipHeads = await r.json();
-        clipSession = await ort.InferenceSession.create(chrome.runtime.getURL(CLIP_MODEL), {
-          executionProviders: ['wasm'],
-        });
-        clipState.probe = clipHeads.probe ? clipHeads.probe.cat : null;
+        let r = null;
+        if (typeof Worker !== 'undefined') {
+          try {
+            r = await loadInWorker();
+            clipState.mode = 'worker';
+          } catch (e) {
+            if (String(e?.message).startsWith('CLIP 모델 없음')) throw e;   // 파일이 없으면 이 문서에서도 못 올린다
+            console.warn('[scareblock] CLIP Worker를 못 띄웠다 — offscreen 안에서 돌린다(YAMNet이 CLIP 뒤에서 기다릴 수 있다)', e);
+          }
+        }
+        if (!r) { r = await loadInline(); clipState.mode = 'inline'; }
+        clipState.probe = r.probe;
         clipState.loadMs = Math.round(performance.now() - t0);
         clipState.ready = true;
         clipState.error = null;
@@ -114,15 +169,25 @@
 
   async function clip(b64) {
     await loadClip();
-    const x = SB.clipNormalize(SB.pcm.decodeBytes(b64));
-    const t0 = performance.now();
-    const out = await clipSession.run({ [clipSession.inputNames[0]]: new ort.Tensor('float32', x, [1, 3, 224, 224]) });
-    const emb = out[clipSession.outputNames[0]].data;
-    const ms = performance.now() - t0;
+    const rgb = SB.pcm.decodeBytes(b64);
+    let result;
+    if (clipState.mode === 'worker' && clipWorker) {
+      const cw = clipWorker;
+      const id = ++cw.seq;
+      result = await new Promise((resolve, reject) => {
+        cw.pending.set(id, { resolve, reject });
+        cw.w.postMessage({ op: 'run', id, rgb }, [rgb.buffer]);
+      });
+    } else {
+      const x = SB.clipNormalize(rgb);
+      const t0 = performance.now();
+      const out = await clipSession.run({ [clipSession.inputNames[0]]: new ort.Tensor('float32', x, [1, 3, 224, 224]) });
+      result = { ...SB.clipHeads(out[clipSession.outputNames[0]].data, clipHeads), ms: performance.now() - t0 };
+    }
     clipState.runs++;
-    clipState.runMs.push(Math.round(ms));
+    clipState.runMs.push(Math.round(result.ms));
     if (clipState.runMs.length > 50) clipState.runMs.shift();
-    return { ...SB.clipHeads(emb, clipHeads), ms };
+    return result;
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -139,10 +204,10 @@
           }
             : null;
     if (!run) return false;
-    queue = queue.then(run).then(
-      (result) => sendResponse({ ok: true, result }),
-      (e) => sendResponse({ ok: false, error: String(e?.message || e) }),
-    );
+    const done = [(result) => sendResponse({ ok: true, result }), (e) => sendResponse({ ok: false, error: String(e?.message || e) })];
+    if (msg.op === 'yamnet') yamnetQueue = yamnetQueue.then(run).then(...done);
+    else if (msg.op === 'clip') clipQueue = clipQueue.then(run).then(...done);
+    else run().then(...done);   // 상태 확인은 줄에 서지 않는다
     return true;
   });
 })();
