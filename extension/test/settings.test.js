@@ -39,6 +39,22 @@ ok('이상한 값은 기본값으로, 모르는 키는 버린다', () => {
   assert.strictEqual(SB.normalizeSettings({ sensitivity: '5' }).sensitivity, 5);
 });
 
+ok('민감도 단계는 잰 발화율에 맞는다 — 다섯 단계 모두 잰 값', () => {
+  assert.deepStrictEqual(SB.SENSITIVITY_SURGE, { 1: 60, 2: 35, 3: 20, 4: 10, 5: 5 });
+  assert.deepStrictEqual(SB.SENSITIVITY_RATE, { 1: 0.49, 2: 1.18, 3: 2.19, 4: 3.94, 5: 6.37 });
+  const r = [1, 2, 3, 4, 5].map((k) => SB.SENSITIVITY_RATE[k]);
+  for (let i = 1; i < r.length; i++) assert.ok(r[i] > r[i - 1], '더 민감할수록 더 자주 울린다');
+});
+
+ok('CLIP은 피 · 거미 · 주사기 중 하나라도 켰을 때만 돈다', () => {
+  const on = { ...SB.config, CLIP: true };
+  assert.strictEqual(SB.clipWanted(SB.normalizeSettings(null), on), true);
+  assert.strictEqual(SB.clipWanted(SB.normalizeSettings({ cats: { blood: false, spider: false, syringe: false } }), on), false);
+  assert.strictEqual(SB.clipWanted(SB.normalizeSettings({ cats: { blood: false, spider: true, syringe: false } }), on), true);
+  assert.strictEqual(SB.clipWanted(SB.normalizeSettings({ cats: { jumpscare: false } }), on), true, '점프 스케어는 CLIP과 무관');
+  assert.strictEqual(SB.clipWanted(SB.normalizeSettings(null), { ...on, CLIP: false }), false, 'config가 끄면 끈다');
+});
+
 ok('민감도는 높을수록 surge가 작다(더 쉽게 울린다)', () => {
   const v = [1, 2, 3, 4, 5].map(SB.surgeFor);
   for (let i = 1; i < v.length; i++) assert.ok(v[i] < v[i - 1], JSON.stringify(v));

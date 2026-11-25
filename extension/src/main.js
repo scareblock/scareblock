@@ -87,7 +87,25 @@ window.SB = window.SB || {};
     if (player?.running) {
       const c = SB.applySettings(settings, { player, detector });
       if (c.length) SB.log(`설정 — ${c.join(' · ')}`);
+      syncClip();
     }
+  }
+
+  /**
+   * CLIP 종류(피 · 거미 · 주사기)를 하나라도 켰을 때만 CLIP을 돌린다(#61 리뷰). 다 끄면 재생기가 결과를 버리기만 하는데
+   * CLIP은 1초마다 계속 돌아 노트북이 힘들다 — 그래서 멈추고, 하나라도 다시 켜면 다시 붙인다.
+   */
+  const clipWanted = () => SB.clipWanted(settings);
+  let clipAttaching = false;
+  async function syncClip() {
+    if (!player?.running || !infer) return;
+    if (!clipWanted()) {
+      if (clip) { clip.stop(); clip = null; SB.log('CLIP 멈춤 — 피 · 거미 · 주사기를 모두 껐다'); }
+      return;
+    }
+    if (clip?.running || clipAttaching) return;
+    clipAttaching = true;
+    try { await attachClip(player.video, player); } finally { clipAttaching = false; }
   }
 
   function teardown() {
@@ -161,7 +179,7 @@ window.SB = window.SB || {};
     const applied = SB.applySettings(settings, { player, detector });
     if (applied.length) SB.log(`설정 — ${applied.join(' · ')}`);
     if (infer && SB.config.YAMNET) attachYamnet(video, player);
-    if (infer && SB.config.CLIP) attachClip(video, player);
+    if (infer && clipWanted()) syncClip();
     SB.log('준비됨 — scareblock.stats() / scareblock.stop() / scareblock.blurNow()');
   }
 
