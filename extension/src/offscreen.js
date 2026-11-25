@@ -13,6 +13,7 @@
   const state = { ready: false, error: null, loadMs: null, runs: 0, runMs: [], classes: null };
   let session = null;
   let loading = null;
+  let queue = Promise.resolve();   // wasm 세션은 한 번에 하나씩 돌린다
 
   function load() {
     if (!loading) {
@@ -124,54 +125,21 @@
     return { ...SB.clipHeads(emb, clipHeads), ms };
   }
 
-  // ── 줄 — YAMNet 먼저 (#54 리뷰 🟡2) ─────────────────────────────────────
-  // wasm 세션은 한 스레드에서 한 번에 하나씩 돈다. 한 줄로 세우면 CLIP(약 0.23초) 뒤에서 YAMNet이 기다린다(#35 11.24 실기:
-  // YAMNet 왕복 26 → 296 ms). 줄을 둘로 나눠 **비면 YAMNet부터** 꺼낸다 — 말소리 기각 · 사이렌은 0.48초마다 오고 짧다(약 25 ms).
-  // 이미 돌고 있는 CLIP 한 장은 끊을 수 없으니, YAMNet이 기다리는 최대 시간은 CLIP 한 장이다.
-  // 모델 올리기(load · loadClip)는 줄 밖에서 한다 — CLIP 첫 로드(352 MB) 동안 YAMNet이 막히지 않게.
-  const hi = [], lo = [];
-  let pumping = false;
-  const qstat = { yamnetWaitMs: [], clipWaitMs: [] };
-
-  function enqueue(high, fn) {
-    return new Promise((resolve, reject) => {
-      (high ? hi : lo).push({ fn, resolve, reject, at: performance.now() });
-      pump();
-    });
-  }
-
-  async function pump() {
-    if (pumping) return;
-    pumping = true;
-    while (hi.length || lo.length) {
-      const high = hi.length > 0;
-      const j = (high ? hi : lo).shift();
-      const w = high ? qstat.yamnetWaitMs : qstat.clipWaitMs;
-      const waited = performance.now() - j.at;
-      w.push(Math.round(waited));
-      if (w.length > 50) w.shift();
-      try { j.resolve(await j.fn(waited)); } catch (e) { j.reject(e); }
-    }
-    pumping = false;
-  }
-
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.to !== 'sb-offscreen') return false;
-    const run = msg.op === 'yamnet'
-      ? () => load().then(() => enqueue(true, async (waitMs) => ({ ...(await yamnet(msg.pcm)), waitMs })))
-      : msg.op === 'clip'
-        ? () => loadClip().then(() => enqueue(false, async (waitMs) => ({ ...(await clip(msg.rgb)), waitMs })))
+    const run = msg.op === 'yamnet' ? () => yamnet(msg.pcm)
+      : msg.op === 'clip' ? () => clip(msg.rgb)
         : msg.op === 'status' ? async () => {
           await load().catch(() => {});
-          return { ...state, classes: state.classes ? state.classes.length : null, names: state.classes, queue: qstat };
+          return { ...state, classes: state.classes ? state.classes.length : null, names: state.classes };
         }
           : msg.op === 'clipStatus' ? async () => {
             await loadClip().catch(() => {});
-            return { ...clipState, queue: qstat };
+            return { ...clipState };
           }
             : null;
     if (!run) return false;
-    run().then(
+    queue = queue.then(run).then(
       (result) => sendResponse({ ok: true, result }),
       (e) => sendResponse({ ok: false, error: String(e?.message || e) }),
     );

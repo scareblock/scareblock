@@ -309,10 +309,10 @@ M1은 손대지 않는 방식으로 잰다. 콘솔을 페이지에 붙여 열면
   자르지 않을 때 4/228로 같았다. 계산은 같은 `clip-prep.js`라 바이트가 같고, 자른 결과는 프레임이 offscreen에 바로 보낸다
 - **비용** (실제 브라우저, onnxruntime-web 1.20.1 wasm 1스레드): 페이지 0.3 ms · 프레임 자르기 약 62 ms(1080p, 다른 프로세스) ·
   추론 약 210 ms/장. `scareblock.clip()`의 `페이지_ms` · `프레임_자르기_ms`로 본다
-- **줄은 둘이다 — YAMNet 먼저** (#54 리뷰 🟡2, 사이렌 PR). wasm은 한 스레드라 한 번에 하나만 돌지만, 줄을 「YAMNet · CLIP」으로 나눠
-  비면 YAMNet부터 꺼낸다. 이미 돌고 있는 CLIP 한 장은 못 끊으니 YAMNet이 기다리는 최대 시간은 CLIP 한 장(약 0.2초)이다.
-  모델 올리기(YAMNet · CLIP 352 MB)는 줄 밖에서 해서, CLIP 첫 로드 동안에도 YAMNet은 줄을 서지 않는다(로드 자체가 스레드를 잡는 시간은 남는다).
-  기다린 시간은 `status` · `clipStatus` 응답의 `queue.yamnetWaitMs` · `clipWaitMs`(최근 50개)로 본다
+  offscreen은 한 스레드 · 한 줄이라 CLIP이 도는 동안 YAMNet 요청이 최대 그만큼 기다린다 — 말소리 거르기(#52)는 시간이 모자라면 그냥 가린다
+- **첫 로드 동안은 YAMNet이 멈춘다.** 영상을 열면 `clipStatus`가 같은 줄에서 모델(352 MB)을 올리므로, 그동안 온 YAMNet 요청은
+  5초 안에 답을 못 받아 null(시간 초과)이 될 수 있다 → 그 사이 탐지는 말소리 확인 없이 가린다. 영상 시작 직후 `scareblock.infer()`의 `시간초과`로 본다.
+  YAMNet과 CLIP의 줄을 가르는 일은 따로 한다(#54 리뷰 🟡)
 
 **같은 점수가 나오는지** — 세 겹으로 본다.
 
@@ -371,10 +371,10 @@ E5 실험 빌드 설정(오디오 탭 + 말소리 기각 켬, CLIP 없음)을 **
 
 **지연** — eval은 「창 끝 − onset + 0.02 s」(중앙값 0.64 · p90 1.26 s)다. 브라우저는 여기에 탭 콜백 · YAMNet 왕복이 더해진다.
 `scareblock.siren()`의 `창끝_뒤_s`가 그 더해진 몫이고, `화면까지_남은_s`가 3초 버퍼에서 남는 시간이다.
+사이렌은 0.48초마다 YAMNet을 부르므로 CLIP과 같은 줄에 서면 밀린다 — 줄 나누기 · CLIP 전용 Worker는 #69(혜인)가 한다.
 
 ```bash
 node extension/test/siren.test.js   # 8/8 — 판정(391 제외) · 0.48초 격자 · 트리거 · 못 얻으면 안 가림 · 밀리면 다시 맞춤 · 설정
-node extension/test/infer.test.js   # 15/15 — 줄: CLIP이 밀려 있어도 YAMNet 먼저
 ```
 
 ## 구조

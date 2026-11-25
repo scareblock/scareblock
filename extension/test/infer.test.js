@@ -56,8 +56,6 @@ global.chrome = {
 
 // ── 가짜 ort: 점수 0번(Speech) = 입력 절댓값 평균, 1번 = 입력 길이. 넘어온 파형을 확인할 수 있게
 let ortRuns = 0;
-const runOrder = [];   // 줄 순서 확인용 (YAMNet 먼저)
-let clipDelayMs = 0;
 global.ort = {
   env: { wasm: {} },
   Tensor: class { constructor(type, data, dims) { Object.assign(this, { type, data, dims }); } },
@@ -70,8 +68,6 @@ global.ort = {
           outputNames: ['image_emb'],
           run: async (feeds) => {
             ortRuns++;
-            runOrder.push('clip');
-            if (clipDelayMs) await new Promise((r) => setTimeout(r, clipDelayMs));
             assert.deepStrictEqual(feeds.pixels.dims, [1, 3, 224, 224]);
             const e = new Float32Array(512);
             e[0] = feeds.pixels.data[0];
@@ -86,7 +82,6 @@ global.ort = {
         outputNames: ['scores', 'embeddings'],
         run: async (feeds, outs) => {
           ortRuns++;
-          runOrder.push('yamnet');
           assert.deepStrictEqual(outs, ['scores']);
           const x = feeds.waveform.data;
           const data = new Float32Array(2 * 521);         // 패치 2개라고 해도 첫 줄만 써야 한다
@@ -197,23 +192,6 @@ ok('clip — 중계는 모양이 틀린 rgb를 버리고 null로 끝난다', asy
   const r = await c.call('clip', { rgb: new Uint8Array(5) }, 500);
   assert.strictEqual(r, null);
   assert.match(c.report().마지막오류, /224×224×3/);
-  c.dispose();
-});
-
-ok('줄 — CLIP이 밀려 있어도 YAMNet을 먼저 꺼낸다 (#54 리뷰 🟡2)', async () => {
-  const c = new SB.InferClient();
-  await c.clipStatus();
-  await c.status();
-  clipDelayMs = 30;
-  runOrder.length = 0;
-  const rgb = new Uint8Array(224 * 224 * 3);
-  const clips = [c.clip(rgb), c.clip(rgb), c.clip(rgb)];
-  await new Promise((r) => setTimeout(r, 5));          // 첫 CLIP이 돌기 시작한 뒤
-  const y = c.yamnet(new Float32Array(SB.YAMNET_WIN_N));
-  await Promise.all([...clips, y]);
-  clipDelayMs = 0;
-  // 첫 CLIP은 이미 돌고 있어 못 끊는다 — 그다음은 YAMNet이어야 한다
-  assert.deepStrictEqual(runOrder, ['clip', 'yamnet', 'clip', 'clip'], runOrder.join(','));
   c.dispose();
 });
 
