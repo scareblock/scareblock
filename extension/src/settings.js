@@ -16,6 +16,7 @@ SB.CATEGORY_LABEL = {
   blood: '피',
   spider: '거미',
   syringe: '주사기',
+  siren: '사이렌',
   manual: '수동',
 };
 
@@ -34,7 +35,7 @@ SB.SETTINGS_DEFAULT = Object.freeze({
   enabled: true,
   mode: 'blur',            // 'blur' — 가리고 소리를 줄인다 | 'warn' — 가리지 않고 미리 알려 준다
   sensitivity: 3,
-  cats: Object.freeze({ jumpscare: true, blood: true, spider: true, syringe: true }),
+  cats: Object.freeze({ jumpscare: true, blood: true, spider: true, syringe: true, siren: true }),
   onboarded: false,
 });
 
@@ -58,6 +59,9 @@ SB.normalizeSettings = (raw) => {
 
 /** CLIP 종류를 하나라도 켰을 때만 CLIP을 돌린다 — 다 끄면 1초마다 돌고 버리기만 한다(#61 리뷰) */
 SB.clipWanted = (s, cfg = SB.config) => !!cfg.CLIP && (cfg.CLIP_CATS || []).some((c) => s.cats?.[c]);
+
+/** 사이렌을 끄면 사이렌 샘플러도 멈춘다 — 0.48초마다 YAMNet을 부르니까(clipWanted와 같은 이유) */
+SB.sirenWanted = (s, cfg = SB.config) => !!cfg.SIREN && !!s.cats?.siren;
 
 SB.surgeFor = (level) => SB.SENSITIVITY_SURGE[level] ?? SB.SENSITIVITY_SURGE[SB.SETTINGS_DEFAULT.sensitivity];
 

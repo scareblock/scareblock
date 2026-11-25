@@ -7,6 +7,7 @@ window.SB = window.SB || {};
   let visual = null;
   let tap = null;
   let clip = null;
+  let siren = null;
   let clipFrame = null;   // 페이지에 하나 — 영상이 바뀌어도 프레임은 그대로 쓴다
   // 클라이언트는 페이지에 하나 — 영상이 바뀌어도 window 메시지 리스너를 다시 걸지 않는다
   const infer = (SB.config.YAMNET || SB.config.CLIP) ? new SB.InferClient() : null;
@@ -27,6 +28,7 @@ window.SB = window.SB || {};
       tap.start();
       SB.yamnet = new SB.Yamnet(tap, infer);
       SB.log(`YAMNet 준비 — 모델 로드 ${st.loadMs} ms`);
+      syncSiren();
     } catch (e) {
       console.error('[scareblock] 오디오 탭 시작 실패 — YAMNet 없이 돈다', e);
       tap = null;
@@ -59,7 +61,25 @@ window.SB = window.SB || {};
     }
   }
 
+  /** 사이렌 — YAMNet이 붙었고 설정에서 켜져 있을 때만. 끄면 멈춘다(0.48초마다 YAMNet을 부르니까) */
+  function syncSiren() {
+    if (!player?.running || !SB.yamnet || !SB.sirenWanted(settings)) {
+      if (siren) { siren.stop(); siren = null; SB.log('사이렌 멈춤'); }
+      return;
+    }
+    if (siren?.running) return;
+    try {
+      siren = new SB.SirenSampler(player.video, player, () => SB.yamnet);
+      siren.start();
+    } catch (e) {
+      console.error('[scareblock] 사이렌 시작 실패 — 없이 돈다', e);
+      siren = null;
+    }
+  }
+
   function stopYamnet() {
+    siren?.stop();
+    siren = null;
     tap?.stop();
     tap = null;
     SB.yamnet = null;
@@ -88,6 +108,7 @@ window.SB = window.SB || {};
       const c = SB.applySettings(settings, { player, detector });
       if (c.length) SB.log(`설정 — ${c.join(' · ')}`);
       syncClip();
+      syncSiren();
     }
   }
 
@@ -164,6 +185,8 @@ window.SB = window.SB || {};
       infer: () => ({ 클라이언트: infer?.report() ?? '꺼짐(config.YAMNET · CLIP)', 탭: tap?.report() ?? '안 붙음' }),
       // CLIP — 프레임 수 · 건너뜀 · 왕복 시간 · 최근 점수
       clip: () => clip?.report() ?? { 안내: 'CLIP이 안 붙었다 — 콘솔의 「CLIP 꺼짐」 줄을 본다' },
+      // 사이렌 — 패치 수 · 사이렌 수 · 왕복 · 창 끝 뒤 지연 · 화면까지 남은 시간 · 최근 점수
+      siren: () => siren?.report() ?? { 안내: '사이렌이 안 붙었다 — YAMNet이 없거나 설정에서 껐다' },
       // 확인용: 미디어 시각 t(기본 지금보다 1.5초 전)부터 패치 하나의 상위 5개 클래스와 Speech
       yamnet: (t) => yamnetTop(t ?? video.currentTime - 1.5),
       // 데모용 동작점 전환. 규칙 탐지기일 때만 있다 — E1 보고값은 20 그대로다
