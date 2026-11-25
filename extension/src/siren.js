@@ -23,7 +23,8 @@
 window.SB = window.SB || {};
 
 SB.SIREN_IDX = [390, 317, 318, 319];   // eval/siren.py CLASSES와 같다 — 391(공습경보)은 넣지 않는다
-SB.SIREN_LATE_MARGIN_S = 0.3;          // 화면에 닿기 이만큼 전에도 판정을 못 시작했으면 그 패치는 건너뛴다
+SB.SIREN_LATE_MARGIN_S = 0.3;          // 여유의 바닥 — 결과가 화면에 닿기 이만큼 전에 못 올 패치는 건너뛴다
+SB.SIREN_LATE_MARGIN_MAX_S = 1.0;      // 여유의 천장 — 다시 맞춘 직후 밀림(≤ 창 + 간격 = 1.455초)과 더해도 3초 지연 안에 들게
 
 /** @returns {{hit: boolean, p: number}} */
 SB.sirenDecide = (scores, theta = SB.config.SIREN_THETA) => {
@@ -51,7 +52,25 @@ SB.SirenSampler = class {
     this.round = new SB.Samples();     // scoresAt 요청 → 점수 (패치가 찰 때까지 기다린 시간 포함)
     this.beyond = new SB.Samples();    // 점수를 받은 순간 − 창 끝 (초). eval의 「창 끝 + 0.02 s」에 브라우저가 더하는 몫
     this.slack = new SB.Samples();     // 점수를 받은 순간, 그 패치가 화면에 닿기까지 남은 시간 (초)
+    this.lag = new SB.Samples(64);     // 최근 64패치의 「점수를 받은 순간 − max(묻던 순간, 창 끝)」 — 여유를 정한다
+    this.margin = SB.SIREN_LATE_MARGIN_S;
     this.recent = [];
+  }
+
+  /**
+   * 건너뛰기 여유 — 최근 YAMNet 계산 시간 p90, [0.3, 1.0]초로 자른다(#70 재리뷰 🟢2).
+   * 「판정 시작」만 보면 왕복이 길 때 결과가 여전히 늦게 올 수 있어서, 결과가 도착할 시각을 어림해 본다.
+   * 천장이 없으면 여유가 커질 때 다시 맞추자마자 또 건너뛰어 패치를 하나도 못 얻는다.
+   */
+  _updateMargin() {
+    const p90 = this.lag.percentile(90);
+    if (p90 == null) return;
+    this.margin = Math.min(SB.SIREN_LATE_MARGIN_MAX_S, Math.max(SB.SIREN_LATE_MARGIN_S, p90));
+  }
+
+  /** 지금 이 패치를 물으면 결과가 화면에 닿기 전에 못 오는가 */
+  _late(s, live) {
+    return Math.max(live, s + this.win) + this.margin > s + this.cfg.DELAY_SEC;
   }
 
   start() {
@@ -81,8 +100,8 @@ SB.SirenSampler = class {
       const live = this.video.currentTime;
       // 결과가 화면에 닿기 전에 못 올 패치는 건너뛰고 지금 판정할 수 있는 최근 격자로 간다(#70 리뷰 🟡1).
       // 밀린 패치를 하나씩 따라가면 구간은 빠짐없지만 매번 늦게 가린다 — 늦은 가림보다 제때 가림이 낫다.
-      // 여유(LATE_MARGIN_S)는 YAMNet 왕복 · 렌더를 생각한 값이다
-      if (this.next + this.cfg.DELAY_SEC - SB.SIREN_LATE_MARGIN_S < live || this.next > live + 1) {
+      // 결과 도착 ≈ max(지금, 창 끝) + 최근 계산 시간 p90 — 이게 화면 시각을 넘으면 늦는다(#70 재리뷰 🟢2)
+      if (this._late(this.next, live) || this.next > live + 1) {
         this._anchor();
         this.n.다시맞춤++;
       }
@@ -93,7 +112,9 @@ SB.SirenSampler = class {
       if (!scores) {
         this.n.못얻음++;
         this._anchor();                  // 시크 · 원점 변경 — 지금 위치에서 다시
-        if (this.next <= s) this.next = s + this.hop;   // 같은 패치를 또 묻지 않는다
+        // 같은 패치를 또 묻지 않는다 — 다시 맞춘 값이 바로 그 패치일 때만 넘긴다.
+        // `next <= s`로 넘기면 뒤로 시크했을 때 시크 전 위치로 가 버린다(#70 재리뷰 🟢3)
+        if (Math.abs(this.next - s) < 1e-6) this.next = s + this.hop;
         await SB.sleep(100);
         continue;
       }
@@ -101,6 +122,8 @@ SB.SirenSampler = class {
       this.n.패치++;
       const now = this.video.currentTime;
       this.beyond.push(now - (s + this.win));
+      this.lag.push(now - Math.max(live, s + this.win));
+      if (this.lag.seen % 8 === 0) this._updateMargin();
       const left = s + this.cfg.DELAY_SEC - now;
       this.slack.push(left);
       if (left < 0) this.n.늦음++;
@@ -126,6 +149,7 @@ SB.SirenSampler = class {
       왕복_ms: this.round.summary(),
       창끝_뒤_s: this.beyond.summary(),     // eval 지연(창 끝 − onset)에 브라우저가 더하는 몫
       화면까지_남은_s: this.slack.summary(),
+      여유_s: +this.margin.toFixed(2),
       ...(this.running ? {} : { 상태: '꺼짐' }),
       최근: this.recent,
     };

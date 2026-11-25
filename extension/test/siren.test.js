@@ -125,6 +125,43 @@ ok('다시 맞출 때 탭이 들고 있는 구간보다 앞 격자는 고르지 
   assert.ok(Math.abs(sm.next - 49.92) < 1e-9, `${sm.next}`);
 });
 
+ok('여유 — 최근 계산 시간 p90, 0.3~1.0초로 자른다 · 결과 도착 기준으로 늦음을 본다 (#70 재리뷰 🟢2)', () => {
+  const sm = new SB.SirenSampler({ currentTime: 0, paused: false }, { addTriggers() {} }, () => null, cfg);
+  assert.strictEqual(sm.margin, SB.SIREN_LATE_MARGIN_S);
+  for (let i = 0; i < 20; i++) sm.lag.push(0.05);
+  sm._updateMargin();
+  assert.strictEqual(sm.margin, 0.3, '빠르면 바닥 0.3');
+  for (let i = 0; i < 64; i++) sm.lag.push(0.7);
+  sm._updateMargin();
+  assert.ok(Math.abs(sm.margin - 0.7) < 1e-9, `${sm.margin}`);
+  for (let i = 0; i < 64; i++) sm.lag.push(5);
+  sm._updateMargin();
+  assert.strictEqual(sm.margin, SB.SIREN_LATE_MARGIN_MAX_S, '천장 1.0');
+  // 천장에서도 다시 맞춘 직후 패치(밀림 ≤ 1.455초)는 늦지 않다 — 또 건너뛰기 반복이 없다
+  assert.strictEqual(sm._late(10, 10 + 0.975 + 0.48), false);
+  sm.margin = 0.7;
+  assert.strictEqual(sm._late(10, 12.2), false);
+  assert.strictEqual(sm._late(10, 12.4), true, '시작은 제때여도 결과가 늦을 패치');
+});
+
+ok('뒤로 시크해서 패치를 못 얻으면 시크 전 위치가 아니라 새 격자로 (#70 재리뷰 🟢3)', async () => {
+  const video = { currentTime: 20, paused: false };
+  const asked = [];
+  let first = true;
+  const yam = {
+    async scoresAt(s) {
+      await new Promise(setImmediate);
+      asked.push(+s.toFixed(2));
+      if (first) { first = false; video.currentTime = 5; return null; }   // 묻는 사이 5초로 되감음
+      return scores(0);
+    },
+  };
+  const sm = new SB.SirenSampler(video, { addTriggers() {} }, () => yam, cfg);
+  await runFor(sm, 2);
+  assert.ok(asked[1] < 5, `되감은 뒤 격자를 물어야 한다: ${asked}`);
+  assert.strictEqual(sm.n.다시맞춤, 0, '다시맞춤이 더 오르지 않는다');
+});
+
 ok('보고 — 창 끝 뒤 지연 · 화면까지 남은 시간', async () => {
   const r = rig({ start: 0 });
   await runFor(r.sm, 3);
