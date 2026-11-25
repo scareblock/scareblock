@@ -22,6 +22,7 @@
 window.SB = window.SB || {};
 
 SB.SIREN_IDX = [390, 317, 318, 319];   // eval/siren.py CLASSES와 같다 — 391(공습경보)은 넣지 않는다
+SB.SIREN_LATE_MARGIN_S = 0.3;          // 화면에 닿기 이만큼 전에도 판정을 못 시작했으면 그 패치는 건너뛴다
 
 /** @returns {{hit: boolean, p: number}} */
 SB.sirenDecide = (scores, theta = SB.config.SIREN_THETA) => {
@@ -59,9 +60,17 @@ SB.SirenSampler = class {
     SB.log(`사이렌 시작 — ${this.hop}초마다 · θ ${this.cfg.SIREN_THETA}`);
   }
 
-  /** 격자를 지금 위치로 다시 맞춘다 — 붙일 때 · 시크 · 너무 밀렸을 때 */
+  /**
+   * 격자를 지금 위치로 다시 맞춘다 — 붙일 때 · 시크 · 밀렸을 때.
+   * 지금 판정할 수 있는 가장 최근 격자(`floor((live − 창) / 간격) · 간격`)로 가되, 탭이 들고 있는 구간보다 앞이면
+   * 그 뒤 첫 격자로 — 시크 직후 탭 원점보다 앞 격자를 물어 「못얻음」만 쌓이는 것을 막는다(#70 리뷰 🟢3).
+   */
   _anchor() {
-    this.next = Math.floor(this.video.currentTime / this.hop) * this.hop;
+    const live = this.video.currentTime;
+    let s = Math.max(0, Math.floor((live - this.win) / this.hop) * this.hop);
+    const from = this.getYamnet()?.tap?.core?.span?.()?.from;
+    if (typeof from === 'number' && s < from) s = Math.ceil(from / this.hop - 1e-9) * this.hop;
+    this.next = s;
   }
 
   async _loop() {
@@ -69,8 +78,10 @@ SB.SirenSampler = class {
       const y = this.getYamnet();
       if (!y || this.video.paused) { await SB.sleep(250); continue; }
       const live = this.video.currentTime;
-      // 이미 화면을 지나간 패치는 건너뛴다 — 탭 숨김 · 오래 멈춤 뒤에 밀린 것을 따라잡느라 늦는 것보다 낫다
-      if (this.next + this.win + this.cfg.DELAY_SEC < live || this.next > live + 1) {
+      // 결과가 화면에 닿기 전에 못 올 패치는 건너뛰고 지금 판정할 수 있는 최근 격자로 간다(#70 리뷰 🟡1).
+      // 밀린 패치를 하나씩 따라가면 구간은 빠짐없지만 매번 늦게 가린다 — 늦은 가림보다 제때 가림이 낫다.
+      // 여유(LATE_MARGIN_S)는 YAMNet 왕복 · 렌더를 생각한 값이다
+      if (this.next + this.cfg.DELAY_SEC - SB.SIREN_LATE_MARGIN_S < live || this.next > live + 1) {
         this._anchor();
         this.n.다시맞춤++;
       }
@@ -81,6 +92,7 @@ SB.SirenSampler = class {
       if (!scores) {
         this.n.못얻음++;
         this._anchor();                  // 시크 · 원점 변경 — 지금 위치에서 다시
+        if (this.next <= s) this.next = s + this.hop;   // 같은 패치를 또 묻지 않는다
         await SB.sleep(100);
         continue;
       }
@@ -97,7 +109,8 @@ SB.SirenSampler = class {
       if (d.hit) {
         this.n.사이렌++;
         this.player.addTriggers([{
-          time: s, category: 'siren', confidence: Math.min(1, d.p), duration: this.win, source: 'yamnet-siren',
+          // confidence는 1 — θ가 0.0025라 점수 그대로 넣으면 「확신 거의 0」처럼 읽힌다(#70 리뷰). 점수는 recent · report에 있다
+          time: s, category: 'siren', confidence: 1, duration: this.win, source: 'yamnet-siren',
         }]);
       }
       this.next = s + this.hop;

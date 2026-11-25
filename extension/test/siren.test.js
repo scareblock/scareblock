@@ -64,10 +64,10 @@ async function runFor(sm, n) {
   SB.sleep = orig;
 }
 
-ok('격자 — 붙인 시각의 floor(t/0.48)·0.48부터 0.48초마다', async () => {
+ok('격자 — 지금 판정할 수 있는 최근 격자 floor((t−0.975)/0.48)·0.48부터 0.48초마다', async () => {
   const r = rig({ start: 10.13 });
   await runFor(r.sm, 4);
-  assert.deepStrictEqual(r.asked.slice(0, 4), [10.08, 10.56, 11.04, 11.52]);
+  assert.deepStrictEqual(r.asked.slice(0, 4), [9.12, 9.6, 10.08, 10.56]);
 });
 
 ok('트리거 — 넘는 패치만, [s, s+0.975), category siren', async () => {
@@ -78,6 +78,7 @@ ok('트리거 — 넘는 패치만, [s, s+0.975), category siren', async () => {
     assert.strictEqual(t.category, 'siren');
     assert.strictEqual(t.duration, 0.975);
     assert.strictEqual(t.source, 'yamnet-siren');
+    assert.strictEqual(t.confidence, 1);   // 점수(0.00x)를 그대로 넣지 않는다 (#70 리뷰)
   }
   assert.strictEqual(r.sm.n.사이렌, 3);
 });
@@ -99,7 +100,29 @@ ok('이미 화면을 지나간 패치는 건너뛰고 다시 맞춘다', async (
   for (let i = 0; i < 10 && r.sm.n.패치 < 1; i++) await new Promise(setImmediate);
   r.sm.stop(); SB.sleep = orig;
   assert.ok(r.sm.n.다시맞춤 >= 1);
-  assert.ok(r.asked[0] >= 29.76, `밀린 0초 패치를 묻지 않는다: ${r.asked[0]}`);
+  assert.ok(r.asked[0] >= 28.8, `밀린 0초 패치를 묻지 않는다: ${r.asked[0]}`);
+});
+
+ok('결과가 화면에 닿기 전에 못 올 패치는 건너뛴다 (#70 리뷰 🟡1)', async () => {
+  const r = rig({ start: 0 });
+  r.sm.running = true;
+  r.sm.next = 0.48;
+  r.video.currentTime = 0.48 + cfg.DELAY_SEC - SB.SIREN_LATE_MARGIN_S + 0.05;   // 여유보다 늦었다
+  const orig = SB.sleep; SB.sleep = () => Promise.resolve();
+  r.sm._loop();
+  for (let i = 0; i < 10 && r.sm.n.패치 < 1; i++) await new Promise(setImmediate);
+  r.sm.stop(); SB.sleep = orig;
+  assert.ok(r.asked[0] > 0.48, `늦을 패치(0.48)를 묻지 않는다: ${r.asked[0]}`);
+  assert.strictEqual(r.sm.n.다시맞춤, 1);
+});
+
+ok('다시 맞출 때 탭이 들고 있는 구간보다 앞 격자는 고르지 않는다 (#70 리뷰 🟢3)', () => {
+  const video = { currentTime: 50.3, paused: false };
+  const yam = { tap: { core: { span: () => ({ from: 49.9, to: 50.3 }) } }, scoresAt: async () => null };
+  const sm = new SB.SirenSampler(video, { addTriggers() {} }, () => yam, cfg);
+  sm._anchor();
+  // floor((50.3−0.975)/0.48)·0.48 = 48.96 < 49.9 → 49.9 뒤 첫 격자 49.92
+  assert.ok(Math.abs(sm.next - 49.92) < 1e-9, `${sm.next}`);
 });
 
 ok('보고 — 창 끝 뒤 지연 · 화면까지 남은 시간', async () => {
