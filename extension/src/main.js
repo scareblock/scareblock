@@ -52,7 +52,8 @@ window.SB = window.SB || {};
     try {
       clip = new SB.ClipSampler(video, p, clipFrame);
       clip.start();
-      SB.log(`CLIP 준비 — 모델 로드 ${st.loadMs} ms · 피 ${st.probe === 'blood' ? '보강 모델' : 'zero-shot'}`);
+      SB.log(`CLIP 준비 — 모델 로드 ${st.loadMs} ms · 피 ${st.probe === 'blood' ? '보강 모델' : 'zero-shot'} · ` +
+             (st.mode === 'worker' ? '전용 Worker' : 'offscreen 안(YAMNet이 CLIP 뒤에서 기다릴 수 있다)'));
     } catch (e) {
       console.error('[scareblock] CLIP 시작 실패 — 없이 돈다', e);
       clip = null;
