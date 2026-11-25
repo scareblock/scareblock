@@ -15,6 +15,9 @@ SB.config = {
   VISUAL_FPS: 2,         // 시각 특징 샘플링 — CLIP과 같은 1~2fps 전제 (README 「모델이 아닌 것」)
   YAMNET: true,          // 별도 문서 추론. offscreen이 준비됐다고 답할 때만 오디오 탭을 붙인다 — 모델이 없으면 비용 0
   SPEECH_GATE: true,     // 말소리 기각(#40). YAMNet이 없으면 판정 없이 그대로 가린다
+  SIREN: true,           // 사이렌 — YAMNet 기존 클래스(390 · 317 · 318 · 319)에 임계값만. YAMNet이 붙었을 때만 돈다
+  SIREN_THETA: 0.002500176429748535,   // neutral-dev 가림 5% (#35 11.23 결과 · eval/siren.py). 바꾸면 보고한 숫자와 달라진다
+  SIREN_HOP_S: 0.48,     // 패치 간격 — eval과 같다
   CLIP: true,            // 피 · 거미 · 주사기. offscreen에 CLIP이 올라왔을 때만 샘플러를 붙인다
   CLIP_FPS: 1,           // eval/clip_zeroshot과 같은 1초에 한 장
   CLIP_CATS: ['blood', 'spider', 'syringe'],

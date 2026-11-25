@@ -23,7 +23,7 @@ const trig = (time, category = 'jumpscare', duration = 1.5) =>
 ok('기본값 = 지금까지의 동작 (켜짐 · 블러 · 민감도 3 = surge 20 · 모두 켬)', () => {
   const s = SB.normalizeSettings(undefined);
   assert.deepStrictEqual(s, { enabled: true, mode: 'blur', sensitivity: 3,
-    cats: { jumpscare: true, blood: true, spider: true, syringe: true }, onboarded: false });
+    cats: { jumpscare: true, blood: true, spider: true, syringe: true, siren: true }, onboarded: false });
   assert.strictEqual(SB.surgeFor(s.sensitivity), 20);
   assert.strictEqual(SB.surgeFor(s.sensitivity), SB.RULE_PARAMS?.surge_of_quiet ?? 20);
 });

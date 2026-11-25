@@ -36,6 +36,7 @@
         "src/detector-rule.js",
         "src/audio-tap.js",
         "src/infer-client.js",
+        "src/siren.js",
         "src/clip-prep.js",
         "src/clip-sampler.js",
         "src/main.js"
