@@ -7,6 +7,7 @@ window.SB = window.SB || {};
   let visual = null;
   let tap = null;
   let clip = null;
+  let clipFrame = null;   // 페이지에 하나 — 영상이 바뀌어도 프레임은 그대로 쓴다
   // 클라이언트는 페이지에 하나 — 영상이 바뀌어도 window 메시지 리스너를 다시 걸지 않는다
   const infer = (SB.config.YAMNET || SB.config.CLIP) ? new SB.InferClient() : null;
 
@@ -41,8 +42,15 @@ window.SB = window.SB || {};
       SB.log(`CLIP 꺼짐 — ${st?.error || infer.stats.마지막오류 || '응답 없음'}`);
       return;
     }
+    // 자르기는 확장 프레임에서 한다(clip-frame.js) — 프레임이 안 붙으면 CLIP 없이 돈다
+    clipFrame ||= new SB.ClipFrameClient();
+    if (!(await clipFrame.ready())) {
+      SB.log(`CLIP 꺼짐 — ${clipFrame.lastError}`);
+      return;
+    }
+    if (p !== player || !p?.running) return;
     try {
-      clip = new SB.ClipSampler(video, p, infer);
+      clip = new SB.ClipSampler(video, p, clipFrame);
       clip.start();
       SB.log(`CLIP 준비 — 모델 로드 ${st.loadMs} ms · 피 ${st.probe === 'blood' ? '보강 모델' : 'zero-shot'}`);
     } catch (e) {

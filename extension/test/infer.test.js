@@ -111,6 +111,7 @@ for (const f of ['src/pcm.js', 'src/clip-prep.js', 'src/infer-client.js', 'src/a
 // 중계는 **따로 떨어진 전역**에서 돌린다 — 실제 ISOLATED world처럼 페이지 쪽 SB가 보이지 않는다.
 // 같은 전역에서 돌리면 중계가 페이지의 SB에 기대도 테스트가 통과한다(11.23 실기에서 그렇게 놓쳤다).
 const bridgeCtx = vm.createContext({
+  document: { getElementById: () => null, createElement: () => ({ style: {}, setAttribute() {} }), body: { appendChild() {} } },   // CLIP 자르기 프레임을 넣는 자리 — 여기서는 보지 않는다
   window: null, location, chrome, btoa, console, setTimeout,
   Float32Array, Uint8Array, Number, Set, String, Error, Promise,   // 메시지로 건너온 배열과 같은 realm
   addEventListener: (...a) => global.addEventListener(...a),
